@@ -1,9 +1,9 @@
-import asyncio, socket, urllib.parse, time, re, base64, hmac, struct, hashlib, io, os
+import asyncio, socket, urllib.parse, re, base64, hmac, struct, hashlib, io, os
+from asyncio import create_task
 from . import admin
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
-create_task = asyncio.create_task
 DRAIN_BUFFER_SIZE = 256 * 1024
 
 
@@ -512,6 +512,8 @@ class SSH(BaseProtocol):
         pass
 
 class Transparent(BaseProtocol):
+    def query_remote(self, sock):
+        raise NotImplementedError(f'{self.name} must implement query_remote()')
     async def guess(self, reader, sock, **kw):
         remote = self.query_remote(sock)
         return remote is not None and (sock is None or sock.getsockname() != remote)

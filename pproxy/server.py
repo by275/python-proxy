@@ -1,4 +1,5 @@
 import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections
+from asyncio import create_task
 from . import proto
 from . import admin
 
@@ -7,7 +8,6 @@ from .__doc__ import *
 SOCKET_TIMEOUT = 60
 UDP_LIMIT = 30
 DUMMY = lambda s: s
-create_task = asyncio.create_task
 
 def patch_StreamReader(c=asyncio.StreamReader):
     c.read_w = lambda self, n: asyncio.wait_for(self.read(n), timeout=SOCKET_TIMEOUT)
