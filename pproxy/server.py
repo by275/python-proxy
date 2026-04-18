@@ -1,4 +1,4 @@
-import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections
+import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections, contextlib
 from asyncio import create_task
 from . import proto
 from . import admin
@@ -704,16 +704,30 @@ class ProxyBackward(ProxySimple):
         self.closed = False
         self.writers = set()
         self.conn = asyncio.Queue()
+    async def watch_connection(self, reader, writer):
+        try:
+            data = await reader.read(1)
+            if data:
+                reader.rollback(data)
+        except Exception:
+            pass
+        finally:
+            if reader.at_eof() and not writer.is_closing():
+                writer.close()
     async def wait_open_connection(self, *args):
         while True:
-            reader, writer = await self.conn.get()
+            reader, writer, watcher = await self.conn.get()
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
             if not reader.at_eof() and not writer.is_closing():
                 return reader, writer
+            writer.close()
     def close(self):
         self.closed = True
         for writer in self.writers:
             try:
-                self.writer.close()
+                writer.close()
             except Exception:
                 pass
     async def start_server(self, args, stream_handler=stream_handler):
@@ -764,7 +778,7 @@ class ProxyBackward(ProxySimple):
                     assert auth == (await reader.read_n(len(auth)))
                 except Exception:
                     return
-            await self.conn.put((reader, writer))
+            await self.conn.put((reader, writer, create_task(self.watch_connection(reader, writer))))
         return self.backward.start_server(args, handler)
 
 
