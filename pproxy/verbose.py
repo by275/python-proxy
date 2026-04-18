@@ -2,6 +2,32 @@ import time, sys, asyncio, functools
 
 b2s = lambda i: f'{i/2**30:.1f}G' if i>=2**30 else f'{i/2**20:.1f}M' if i>=2**20 else f'{i/1024:.1f}K'
 
+
+class StatUpdater:
+    __slots__ = ("primary", "secondary", "index")
+
+    def __init__(self, primary, secondary, index):
+        self.primary = primary
+        self.secondary = secondary
+        self.index = index
+
+    def __call__(self, size):
+        index = self.index
+        self.primary[index] += size
+        self.secondary[index] += size
+
+
+class ConnectionStat:
+    __slots__ = ("updaters",)
+
+    def __init__(self, primary, secondary):
+        self.updaters = tuple(
+            StatUpdater(primary, secondary, index) for index in range(6)
+        )
+
+    def __call__(self, index):
+        return self.updaters[index]
+
 def all_stat_other(stats):
     cmd = sys.stdin.readline()
     all_stat(stats)
@@ -54,8 +80,7 @@ def setup(loop, args):
     def modstat(user, remote_ip, host_name, stats=args.stats):
         u = user.decode().split(':')[0]+':' if isinstance(user, (bytes,bytearray)) else ''
         host_name_2 = '.'.join(host_name.split('.')[-3 if host_name.endswith('.com.cn') else -2:]) if host_name.split('.')[-1].isalpha() else host_name
-        tostat = (stats[0], stats.setdefault(u+remote_ip, {}).setdefault(host_name_2, [0]*6))
-        return lambda i: lambda s: [st.__setitem__(i, st[i] + s) for st in tostat]
+        return ConnectionStat(stats[0], stats.setdefault(u+remote_ip, {}).setdefault(host_name_2, [0]*6))
     args.modstat = modstat
     def win_readline(handler):
         while True:
