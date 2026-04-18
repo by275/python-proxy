@@ -4,10 +4,16 @@ HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
 create_task = asyncio.create_task
+DRAIN_BUFFER_SIZE = 256 * 1024
 
 
 def _decode_header_value(value):
     return value.decode('latin1')
+
+
+async def drain_if_needed(writer, force=False):
+    if force:
+        await writer.drain()
 
 
 def parse_http_request_head(data):
@@ -94,6 +100,7 @@ class BaseProtocol:
     async def channel(self, reader, writer, stat_bytes, stat_conn):
         try:
             stat_conn(1)
+            pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
                 data = await reader.read(65536)
                 if not data:
@@ -102,7 +109,10 @@ class BaseProtocol:
                     continue
                 stat_bytes(len(data))
                 writer.write(data)
-                await writer.drain()
+                pending_drain += len(data)
+                if pending_drain >= DRAIN_BUFFER_SIZE:
+                    await writer.drain()
+                    pending_drain = 0
         except Exception:
             pass
         finally:
@@ -330,7 +340,7 @@ class HTTP(BaseProtocol):
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
+                await drain_if_needed(writer, force=True)
         return await self.http_accept(user, method, path, None, ver, filtered_headers, host, proxy_authorization, reply, **kw)
     async def http_accept(self, user, method, path, authority, ver, filtered_headers, host, pauth, reply, authtable, users, httpget=None, **kw):
         url = urllib.parse.urlparse(path)
@@ -375,6 +385,7 @@ class HTTP(BaseProtocol):
     async def http_channel(self, reader, writer, stat_bytes, stat_conn):
         try:
             stat_conn(1)
+            pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
                 data = await reader.read(65536)
                 if not data:
@@ -388,7 +399,10 @@ class HTTP(BaseProtocol):
                     data = f'{method} {newpath} {ver}\r\n'.encode() + filtered_headers + b'\r\n\r\n' + data
                 stat_bytes(len(data))
                 writer.write(data)
-                await writer.drain()
+                pending_drain += len(data)
+                if pending_drain >= DRAIN_BUFFER_SIZE:
+                    await writer.drain()
+                    pending_drain = 0
         except Exception:
             pass
         finally:
@@ -432,7 +446,7 @@ class H2(HTTP):
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
+                await drain_if_needed(writer, force=True)
         return await self.http_accept(user, headers[':method'], headers[':path'], headers[':authority'], '2.0', lines, '', headers.get('proxy-authorization'), reply, **kw)
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
         headers = [(':method', 'CONNECT'), (':scheme', 'https'), (':path', '/'),
@@ -458,7 +472,7 @@ class HTTPAdmin(HTTP):
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
+                await drain_if_needed(writer, force=True)
 
         content_length = int(headers.get('Content-Length','0'))
         content = ''
