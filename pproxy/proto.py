@@ -2,6 +2,7 @@ import asyncio, socket, urllib.parse, time, re, base64, hmac, struct, hashlib, i
 from . import admin
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
+create_task = asyncio.create_task
 
 def netloc_split(loc, default_host=None, default_port=None):
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
@@ -217,7 +218,8 @@ class Socks4(BaseProtocol):
         writer.write(b'\x00\x5a' + port.to_bytes(2, 'big') + ip)
         return user, socket.inet_ntoa(ip), port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
-        ip = socket.inet_aton((await asyncio.get_event_loop().getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
+        loop = asyncio.get_running_loop()
+        ip = socket.inet_aton((await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
         writer_remote.write(b'\x04\x01' + port.to_bytes(2, 'big') + ip + rauth + b'\x00')
         assert await reader_remote.read_n(2) == b'\x00\x5a'
         await reader_remote.read_n(6)
@@ -627,7 +629,7 @@ def sslwrap(reader, writer, sslcontext, server_side=False, server_hostname=None,
             ssl_reader.feed_eof()
         def connection_lost(self, exc):
             ssl_reader.feed_eof()
-    ssl = asyncio.sslproto.SSLProtocol(asyncio.get_event_loop(), Protocol(), sslcontext, None, server_side, server_hostname, False)
+    ssl = asyncio.sslproto.SSLProtocol(asyncio.get_running_loop(), Protocol(), sslcontext, None, server_side, server_hostname, False)
     class Transport(asyncio.Transport):
         _paused = False
         def __init__(self, extra={}):
@@ -667,7 +669,7 @@ def sslwrap(reader, writer, sslcontext, server_side=False, server_hostname=None,
             pass
         finally:
             ssl.eof_received()
-    asyncio.ensure_future(channel())
+    create_task(channel())
     class Writer():
         def get_extra_info(self, key):
             return writer.get_extra_info(key)

@@ -62,9 +62,8 @@ def setup(loop, args):
             line = sys.stdin.readline()
             handler()
     if args.v >= 2:
-        asyncio.ensure_future(realtime_stat(args.stats[0]))
+        loop.create_task(realtime_stat(args.stats[0]))
         if sys.platform != 'win32':
             loop.add_reader(sys.stdin, functools.partial(all_stat_other, args.stats))
         else:
             loop.run_in_executor(None, win_readline, functools.partial(all_stat, args.stats))
-

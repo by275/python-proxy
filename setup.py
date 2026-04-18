@@ -21,7 +21,7 @@ setup(
     author              = find_value('author'),
     author_email        = find_value('email'),
     license             = find_value('license'),
-    python_requires     = '>=3.6',
+    python_requires     = '>=3.12',
     keywords            = find_value('keywords'),
     packages            = ['pproxy'],
     classifiers         = [
@@ -32,8 +32,8 @@ setup(
         'Topic :: Software Development :: Build Tools',
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
     ],
     extras_require      = {
         'accelerated': [
