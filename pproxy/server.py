@@ -910,8 +910,8 @@ def print_server_started(option, server, print_fn):
         laddr = s.getsockname() # tuple size varies with protocol family
         h = laddr[0]
         p = laddr[1]
-        f = str(s.family)
-        ipversion = "ipv4" if f == "AddressFamily.AF_INET" else ("ipv6" if f == "AddressFamily.AF_INET6" else "ipv?") # TODO better
+        family = s.family
+        ipversion = "ipv4" if family == socket.AF_INET else ("ipv6" if family == socket.AF_INET6 else "ipv?")
         bind = ipversion+' '+h+':'+str(p)
         print_fn(option, bind)
 
