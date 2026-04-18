@@ -1,7 +1,68 @@
-import asyncio, socket, urllib.parse, time, re, base64, hmac, struct, hashlib, io, os
+import asyncio, socket, urllib.parse, re, base64, hmac, struct, hashlib, io, os
+from asyncio import create_task
 from . import admin
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
+HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
+DRAIN_BUFFER_SIZE = 256 * 1024
+
+
+def _decode_header_value(value):
+    return value.decode('latin1')
+
+
+async def drain_if_needed(writer, force=False):
+    if force:
+        await writer.drain()
+
+
+def parse_http_request_head(data):
+    request_line, *header_lines = data.split(b'\r\n')
+    match = HTTP_METHOD_LINE.match(request_line)
+    if match is None:
+        raise Exception('Unknown HTTP header')
+    method_b, path_b, ver_b = match.groups()
+    filtered_headers = []
+    host = ''
+    proxy_authorization = None
+    sec_websocket_key = None
+    for header in header_lines:
+        key, sep, value = header.partition(b': ')
+        if sep:
+            if key == b'Host':
+                host = _decode_header_value(value)
+            elif key == b'Proxy-Authorization':
+                proxy_authorization = _decode_header_value(value)
+            elif key == b'Sec-WebSocket-Key':
+                sec_websocket_key = _decode_header_value(value)
+        if not header.startswith(b'Proxy-'):
+            filtered_headers.append(header)
+    return (
+        _decode_header_value(method_b),
+        _decode_header_value(path_b),
+        _decode_header_value(ver_b),
+        b'\r\n'.join(filtered_headers),
+        host,
+        proxy_authorization,
+        sec_websocket_key,
+    )
+
+
+def decode_http_header_block(header_block):
+    header_lines = header_block.split(b'\r\n') if header_block else ()
+    headers = {}
+    for line in header_lines:
+        key, sep, value = line.partition(b': ')
+        if sep:
+            headers[_decode_header_value(key)] = _decode_header_value(value)
+    return headers, '\r\n'.join(_decode_header_value(line) for line in header_lines)
+
+
+def xor_mask_bytes(data, mask_key):
+    masked = bytearray(data)
+    for index, value in enumerate(masked):
+        masked[index] = value ^ mask_key[index % 4]
+    return bytes(masked)
 
 def netloc_split(loc, default_host=None, default_port=None):
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
@@ -18,9 +79,10 @@ async def socks_address_stream(reader, n):
         data = await reader.read_n(4)
         host_name = socket.inet_ntoa(data)
     elif n in (3, 19):
-        data = await reader.read_n(1)
-        data += await reader.read_n(data[0])
-        host_name = data[1:].decode()
+        host_length = await reader.read_n(1)
+        host_data = await reader.read_n(host_length[0])
+        data = host_length + host_data
+        host_name = host_data.decode()
     elif n in (4, 20):
         data = await reader.read_n(16)
         host_name = socket.inet_ntop(socket.AF_INET6, data)
@@ -56,6 +118,7 @@ class BaseProtocol:
     async def channel(self, reader, writer, stat_bytes, stat_conn):
         try:
             stat_conn(1)
+            pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
                 data = await reader.read(65536)
                 if not data:
@@ -64,7 +127,10 @@ class BaseProtocol:
                     continue
                 stat_bytes(len(data))
                 writer.write(data)
-                await writer.drain()
+                pending_drain += len(data)
+                if pending_drain >= DRAIN_BUFFER_SIZE:
+                    await writer.drain()
+                    pending_drain = 0
         except Exception:
             pass
         finally:
@@ -217,7 +283,8 @@ class Socks4(BaseProtocol):
         writer.write(b'\x00\x5a' + port.to_bytes(2, 'big') + ip)
         return user, socket.inet_ntoa(ip), port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
-        ip = socket.inet_aton((await asyncio.get_event_loop().getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
+        loop = asyncio.get_running_loop()
+        ip = socket.inet_aton((await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
         writer_remote.write(b'\x04\x01' + port.to_bytes(2, 'big') + ip + rauth + b'\x00')
         assert await reader_remote.read_n(2) == b'\x00\x5a'
         await reader_remote.read_n(6)
@@ -285,18 +352,15 @@ class HTTP(BaseProtocol):
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
     async def accept(self, reader, user, writer, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
-        return await self.http_accept(user, method, path, None, ver, lines, headers.get('Host', ''), headers.get('Proxy-Authorization'), reply, **kw)
-    async def http_accept(self, user, method, path, authority, ver, lines, host, pauth, reply, authtable, users, httpget=None, **kw):
+                await drain_if_needed(writer, force=True)
+        return await self.http_accept(user, method, path, None, ver, filtered_headers, host, proxy_authorization, reply, **kw)
+    async def http_accept(self, user, method, path, authority, ver, filtered_headers, host, pauth, reply, authtable, users, httpget=None, **kw):
         url = urllib.parse.urlparse(path)
         if method == 'GET' and not url.hostname:
             for path, text in (httpget.items() if httpget else ()):
@@ -324,8 +388,13 @@ class HTTP(BaseProtocol):
         else:
             host_name, port = netloc_split(url.netloc or host, default_port=80)
             newpath = url._replace(netloc='', scheme='').geturl()
+            request_head = (
+                f'{method} {newpath} {ver}\r\n'.encode() +
+                filtered_headers +
+                b'\r\n\r\n'
+            )
             async def connected(writer):
-                writer.write(f'{method} {newpath} {ver}\r\n{lines}\r\n\r\n'.encode())
+                writer.write(request_head)
                 return True
             return user, host_name, port, connected
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
@@ -334,23 +403,25 @@ class HTTP(BaseProtocol):
     async def http_channel(self, reader, writer, stat_bytes, stat_conn):
         try:
             stat_conn(1)
+            pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
                 data = await reader.read(65536)
                 if not data:
                     break
-                if b'\r\n' in data and HTTP_LINE.match(data.split(b'\r\n', 1)[0].decode()):
+                request_line, sep, _ = data.partition(b'\r\n')
+                if sep and HTTP_METHOD_LINE.match(request_line):
                     if b'\r\n\r\n' not in data:
                         data += await reader.readuntil(b'\r\n\r\n')
                     lines, data = data.split(b'\r\n\r\n', 1)
-                    headers = lines.decode().split('\r\n')
-                    method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-                    lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-                    headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+                    method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines)
                     newpath = urllib.parse.urlparse(path)._replace(netloc='', scheme='').geturl()
-                    data = f'{method} {newpath} {ver}\r\n{lines}\r\n\r\n'.encode() + data
+                    data = f'{method} {newpath} {ver}\r\n'.encode() + filtered_headers + b'\r\n\r\n' + data
                 stat_bytes(len(data))
                 writer.write(data)
-                await writer.drain()
+                pending_drain += len(data)
+                if pending_drain >= DRAIN_BUFFER_SIZE:
+                    await writer.drain()
+                    pending_drain = 0
         except Exception:
             pass
         finally:
@@ -360,20 +431,22 @@ class HTTP(BaseProtocol):
 class HTTPOnly(HTTP):
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
         buffer = bytearray()
-        HOST_NAME = re.compile('\r\nHost: ([^\r\n]+)\r\n', re.I)
+        host_name_pattern = re.compile(br'\r\nHost: ([^\r\n]+)\r\n', re.I)
         def write(data, o=writer_remote.write):
             if not data: return
             buffer.extend(data)
             pos = buffer.find(b'\r\n\r\n')
             if pos != -1:
-                text = buffer[:pos].decode()
-                header = HTTP_LINE.match(text.split('\r\n', 1)[0])
-                host = HOST_NAME.search(text)
+                request_head = buffer[:pos]
+                request_line = request_head.split(b'\r\n', 1)[0]
+                header = HTTP_METHOD_LINE.match(request_line)
+                host = host_name_pattern.search(b'\r\n' + request_head + b'\r\n')
                 if not header or not host:
                     writer_remote.close()
                     raise Exception('Unknown HTTP header for protocol HTTPOnly')
                 method, path, ver = header.groups()
-                data = f'{method} http://{host.group(1)}{path} {ver}\r\nHost: {host.group(1)}'.encode() + (b'\r\nProxy-Authorization: Basic '+base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n' + buffer[pos+4:]
+                host_value = host.group(1)
+                data = method + b' http://' + host_value + path + b' ' + ver + b'\r\nHost: ' + host_value + (b'\r\nProxy-Authorization: Basic ' + base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n' + buffer[pos+4:]
                 buffer.clear()
                 return o(data)
         writer_remote.write = write
@@ -392,7 +465,7 @@ class H2(HTTP):
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
+                await drain_if_needed(writer, force=True)
         return await self.http_accept(user, headers[':method'], headers[':path'], headers[':authority'], '2.0', lines, '', headers.get('proxy-authorization'), reply, **kw)
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
         headers = [(':method', 'CONNECT'), (':scheme', 'https'), (':path', '/'),
@@ -408,16 +481,14 @@ class H3(H2):
 class HTTPAdmin(HTTP):
     async def accept(self, reader, user, writer, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
+        headers, lines = decode_http_header_block(filtered_headers)
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
                 writer.write(body)
             if wait:
-                await writer.drain()
+                await drain_if_needed(writer, force=True)
 
         content_length = int(headers.get('Content-Length','0'))
         content = ''
@@ -441,6 +512,8 @@ class SSH(BaseProtocol):
         pass
 
 class Transparent(BaseProtocol):
+    def query_remote(self, sock):
+        raise NotImplementedError(f'{self.name} must implement query_remote()')
     async def guess(self, reader, sock, **kw):
         remote = self.query_remote(sock)
         return remote is not None and (sock is None or sock.getsockname() != remote)
@@ -522,7 +595,7 @@ class WS(BaseProtocol):
                         break
                     data = _buffer[:data_len]
                     if mask_key:
-                        data = bytes(data[i]^mask_key[i%4] for i in range(data_len))
+                        data = xor_mask_bytes(data, mask_key)
                     del _buffer[:data_len]
                     data_len = None
                     o(data)
@@ -535,20 +608,16 @@ class WS(BaseProtocol):
             data_len = len(data)
             if masked:
                 mask_key = os.urandom(4)
-                data = bytes(data[i]^mask_key[i%4] for i in range(data_len))
+                data = xor_mask_bytes(data, mask_key)
                 return o(b'\x02' + (bytes([data_len|0x80]) if data_len < 126 else b'\xfe'+data_len.to_bytes(2, 'big') if data_len < 65536 else b'\xff'+data_len.to_bytes(4, 'big')) + mask_key + data)
             else:
                 return o(b'\x02' + (bytes([data_len]) if data_len < 126 else b'\x7e'+data_len.to_bytes(2, 'big') if data_len < 65536 else b'\x7f'+data_len.to_bytes(4, 'big')) + data)
         writer.write = write
     async def accept(self, reader, user, writer, users, authtable, sock, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
         url = urllib.parse.urlparse(path)
         if users:
-            pauth = headers.get('Proxy-Authorization', None)
             user = authtable.authed()
             if not user:
                 user = next(filter(lambda i: ('Basic '+base64.b64encode(i).decode()) == pauth, users), None)
@@ -558,9 +627,9 @@ class WS(BaseProtocol):
             authtable.set_authed(user)
         if method != 'GET':
             raise Exception(f'Unsupported method {method}')
-        if headers.get('Sec-WebSocket-Key', None) is None:
-            raise Exception(f'Unsupported headers {headers}')
-        seckey = base64.b64decode(headers.get('Sec-WebSocket-Key'))
+        if sec_websocket_key is None:
+            raise Exception('Unsupported headers for WebSocket')
+        seckey = base64.b64decode(sec_websocket_key)
         rseckey = base64.b64encode(hashlib.sha1(seckey+b'amtf').digest()[:16]).decode()
         writer.write(f'{ver} 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {rseckey}\r\nSec-WebSocket-Protocol: chat\r\n\r\n'.encode())
         self.patch_ws_stream(reader, writer, False)
@@ -627,7 +696,7 @@ def sslwrap(reader, writer, sslcontext, server_side=False, server_hostname=None,
             ssl_reader.feed_eof()
         def connection_lost(self, exc):
             ssl_reader.feed_eof()
-    ssl = asyncio.sslproto.SSLProtocol(asyncio.get_event_loop(), Protocol(), sslcontext, None, server_side, server_hostname, False)
+    ssl = asyncio.sslproto.SSLProtocol(asyncio.get_running_loop(), Protocol(), sslcontext, None, server_side, server_hostname, False)
     class Transport(asyncio.Transport):
         _paused = False
         def __init__(self, extra={}):
@@ -667,7 +736,7 @@ def sslwrap(reader, writer, sslcontext, server_side=False, server_hostname=None,
             pass
         finally:
             ssl.eof_received()
-    asyncio.ensure_future(channel())
+    create_task(channel())
     class Writer():
         def get_extra_info(self, key):
             return writer.get_extra_info(key)

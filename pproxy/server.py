@@ -1,4 +1,5 @@
-import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys
+import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections
+from asyncio import create_task
 from . import proto
 from . import admin
 
@@ -19,11 +20,11 @@ patch_StreamReader()
 patch_StreamWriter()
 
 class AuthTable(object):
-    _auth = {}
-    _user = {}
     def __init__(self, remote_ip, authtime):
         self.remote_ip = remote_ip
         self.authtime = authtime
+        self._auth = {}
+        self._user = {}
     def authed(self):
         if time.time() - self._auth.get(self.remote_ip, 0) <= self.authtime:
             return self._user[self.remote_ip]
@@ -43,6 +44,12 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
         return cipher(reader, writer, cipher.pdecrypt, cipher.pdecrypt2, cipher.pencrypt, cipher.pencrypt2)
     else:
         return None, None
+
+
+async def relay_with_taskgroup(inbound, outbound):
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(inbound)
+        tg.create_task(outbound)
 
 def schedule(rserver, salgorithm, host_name, port):
     filter_cond = lambda o: o.alive and o.match_rule(host_name, port)
@@ -75,9 +82,9 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
         reader_cipher, _ = await prepare_ciphers(cipher, reader, writer, server_side=False)
         lproto, user, host_name, port, client_connected = await proto.accept(protos, reader=reader, writer=writer, authtable=AuthTable(remote_ip, authtime), reader_cipher=reader_cipher, sock=writer.get_extra_info('socket'), **kwargs)
         if host_name == 'echo':
-            asyncio.ensure_future(lproto.channel(reader, writer, DUMMY, DUMMY))
+            create_task(lproto.channel(reader, writer, DUMMY, DUMMY))
         elif host_name == 'empty':
-            asyncio.ensure_future(lproto.channel(reader, writer, None, DUMMY))
+            create_task(lproto.channel(reader, writer, None, DUMMY))
         elif block and block(host_name):
             raise Exception('BLOCK ' + host_name)
         else:
@@ -95,8 +102,10 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
                 raise Exception('Unknown remote protocol')
             m = modstat(user, remote_ip, host_name)
             lchannel = lproto.http_channel if use_http else lproto.channel
-            asyncio.ensure_future(lproto.channel(reader_remote, writer, m(2+roption.direct), m(4+roption.direct)))
-            asyncio.ensure_future(lchannel(reader, writer_remote, m(roption.direct), roption.connection_change))
+            await relay_with_taskgroup(
+                lproto.channel(reader_remote, writer, m(2+roption.direct), m(4+roption.direct)),
+                lchannel(reader, writer_remote, m(roption.direct), roption.connection_change),
+            )
     except Exception as ex:
         if not isinstance(ex, asyncio.TimeoutError) and not str(ex).startswith('Connection closed'):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
@@ -162,6 +171,7 @@ class ProxyDirect(object):
         self.alive = True
         self.connections = 0
         self.udpmap = {}
+        self.udp_lru = collections.OrderedDict()
     @property
     def direct(self):
         return type(self) is ProxyDirect
@@ -175,43 +185,54 @@ class ProxyDirect(object):
         return data
     def destination(self, host, port):
         return host, port
+    def udp_touch(self, addr, prot):
+        self.udpmap[addr] = prot
+        self.udp_lru[addr] = prot
+        self.udp_lru.move_to_end(addr)
+    def udp_discard(self, addr):
+        self.udp_lru.pop(addr, None)
+        return self.udpmap.pop(addr, None)
+    def udp_evict_if_needed(self):
+        if len(self.udp_lru) < UDP_LIMIT:
+            return
+        addr, prot = self.udp_lru.popitem(last=False)
+        self.udpmap.pop(addr, None)
+        if prot.transport:
+            prot.transport.close()
     async def udp_open_connection(self, host, port, data, addr, reply):
         class Protocol(asyncio.DatagramProtocol):
             def __init__(prot, data):
-                self.udpmap[addr] = prot
                 prot.databuf = [data]
                 prot.transport = None
-                prot.update = 0
+                self.udp_touch(addr, prot)
             def connection_made(prot, transport):
                 prot.transport = transport
                 for data in prot.databuf:
                     transport.sendto(data)
                 prot.databuf.clear()
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def new_data_arrived(prot, data):
                 if prot.transport:
                     prot.transport.sendto(data)
                 else:
                     prot.databuf.append(data)
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def datagram_received(prot, data, addr):
                 data = self.udp_packet_unpack(data)
                 reply(data)
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def connection_lost(prot, exc):
-                self.udpmap.pop(addr, None)
+                self.udp_discard(addr)
         if addr in self.udpmap:
-            self.udpmap[addr].new_data_arrived(data)
+            prot = self.udpmap[addr]
+            prot.new_data_arrived(data)
         else:
             self.connection_change(1)
-            if len(self.udpmap) > UDP_LIMIT:
-                min_addr = min(self.udpmap, key=lambda x: self.udpmap[x].update)
-                prot = self.udpmap.pop(min_addr)
-                if prot.transport:
-                    prot.transport.close()
+            self.udp_evict_if_needed()
             prot = lambda: Protocol(data)
             remote = self.destination(host, port)
-            await asyncio.get_event_loop().create_datagram_endpoint(prot, remote_addr=remote)
+            loop = asyncio.get_running_loop()
+            await loop.create_datagram_endpoint(prot, remote_addr=remote)
     def udp_prepare_connection(self, host, port, data):
         return data
     def wait_open_connection(self, host, port, local_addr, family):
@@ -285,8 +306,9 @@ class ProxySimple(ProxyDirect):
             def connection_made(prot, transport):
                 prot.transport = transport
             def datagram_received(prot, data, addr):
-                asyncio.ensure_future(datagram_handler(prot.transport, data, addr, **vars(self), **args))
-        return asyncio.get_event_loop().create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
+                create_task(datagram_handler(prot.transport, data, addr, **vars(self), **args))
+        loop = asyncio.get_running_loop()
+        return loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
     def wait_open_connection(self, host, port, local_addr, family):
         if self.unix:
             return asyncio.open_unix_connection(path=self.bind)
@@ -333,7 +355,7 @@ class ProxyH2(ProxySimple):
                     if event.stream_id not in streams:
                         stream_reader, stream_writer = self.get_stream(conn, writer, event.stream_id)
                         streams[event.stream_id] = (stream_reader, stream_writer)
-                        asyncio.ensure_future(stream_handler(stream_reader, stream_writer))
+                        create_task(stream_handler(stream_reader, stream_writer))
                     else:
                         stream_reader, stream_writer = streams[event.stream_id]
                     stream_writer.headers.set_result(event.headers)
@@ -365,7 +387,7 @@ class ProxyH2(ProxySimple):
         class StreamWriter():
             def __init__(self):
                 self.closed = False
-                self.headers = asyncio.get_event_loop().create_future()
+                self.headers = asyncio.get_running_loop().create_future()
             def get_extra_info(self, key):
                 return writer.get_extra_info(key)
             def write(self, data):
@@ -402,16 +424,16 @@ class ProxyH2(ProxySimple):
                     await write_wait.wait()
             conn.send_data(stream_id, b'', end_stream=True)
             writer.write(conn.data_to_send())
-        asyncio.ensure_future(write_job())
+        create_task(write_job())
         return reader, stream_writer
     async def wait_h2_connection(self, local_addr, family):
         if self.handshake is not None:
             if not self.handshake.done():
                 await self.handshake
         else:
-            self.handshake = asyncio.get_event_loop().create_future()
+            self.handshake = asyncio.get_running_loop().create_future()
             reader, writer = await super().wait_open_connection(None, None, local_addr, family)
-            asyncio.ensure_future(self.handler(reader, writer))
+            create_task(self.handler(reader, writer))
             await self.handshake
         return self.handshake.result()
     async def wait_open_connection(self, host, port, local_addr, family):
@@ -453,7 +475,7 @@ class ProxyQUIC(ProxySimple):
             if not self.handshake.done():
                 await self.handshake
         else:
-            self.handshake = asyncio.get_event_loop().create_future()
+            self.handshake = asyncio.get_running_loop().create_future()
             import aioquic.asyncio, aioquic.quic.events
             class Protocol(aioquic.asyncio.QuicConnectionProtocol):
                 def quic_event_received(s, event):
@@ -499,7 +521,7 @@ class ProxyQUIC(ProxySimple):
                     addr = ('quic '+self.bind, stream_id)
                     event.sendto = lambda data, addr: (s._quic.send_stream_data(stream_id, data, False), s.transmit())
                     event.get_extra_info = {}.get
-                    asyncio.ensure_future(datagram_handler(event, event.data, addr, **vars(self), **args))
+                    create_task(datagram_handler(event, event.data, addr, **vars(self), **args))
                     return
                 super().quic_event_received(event)
         return await aioquic.asyncio.serve(self.host_name, self.port, configuration=self.quicserver, create_protocol=Protocol), None
@@ -507,7 +529,7 @@ class ProxyQUIC(ProxySimple):
         import aioquic.asyncio
         def handler(reader, writer):
             self.patch_writer(writer)
-            asyncio.ensure_future(stream_handler(reader, writer, **vars(self), **args))
+            create_task(stream_handler(reader, writer, **vars(self), **args))
         return aioquic.asyncio.serve(self.host_name, self.port, configuration=self.quicserver, stream_handler=handler)
 
 class ProxyH3(ProxyQUIC):
@@ -517,7 +539,7 @@ class ProxyH3(ProxyQUIC):
         class StreamWriter():
             def __init__(self):
                 self.closed = False
-                self.headers = asyncio.get_event_loop().create_future()
+                self.headers = asyncio.get_running_loop().create_future()
             def get_extra_info(self, key):
                 return dict(peername=remote_addr, sockname=remote_addr).get(key)
             def write(self, data):
@@ -559,7 +581,7 @@ class ProxyH3(ProxyQUIC):
                     if event.stream_id not in s.streams and server_side:
                         reader, writer = s.create_stream(event.stream_id)
                         writer.headers.set_result(event.headers)
-                        asyncio.ensure_future(handler(reader, writer))
+                        create_task(handler(reader, writer))
                 elif isinstance(event, aioquic.h3.events.DataReceived) and event.stream_id in s.streams:
                     reader, writer = s.streams[event.stream_id]
                     if event.data:
@@ -586,7 +608,7 @@ class ProxyH3(ProxyQUIC):
                 await self.handshake
         else:
             import aioquic.asyncio
-            self.handshake = asyncio.get_event_loop().create_future()
+            self.handshake = asyncio.get_running_loop().create_future()
             self.quic_egress_acm = aioquic.asyncio.connect(self.host_name, self.port, create_protocol=self.get_protocol(), configuration=self.quicclient)
             conn = await self.quic_egress_acm.__aenter__()
             await self.handshake
@@ -612,7 +634,7 @@ class ProxySSH(ProxySimple):
                     break
                 reader.feed_data(buf)
             reader.feed_eof()
-        asyncio.ensure_future(channel())
+        create_task(channel())
         remote_addr = ('ssh:'+str(host), port)
         writer.get_extra_info = dict(peername=remote_addr, sockname=remote_addr).get
         return reader, writer
@@ -621,7 +643,7 @@ class ProxySSH(ProxySimple):
             if not self.sshconn.done():
                 await self.sshconn
         else:
-            self.sshconn = asyncio.get_event_loop().create_future()
+            self.sshconn = asyncio.get_running_loop().create_future()
             try:
                 import asyncssh
             except Exception:
@@ -697,7 +719,7 @@ class ProxyBackward(ProxySimple):
     async def start_server(self, args, stream_handler=stream_handler):
         handler = functools.partial(stream_handler, **vars(self.server), **args)
         for _ in range(self.backward_num):
-            asyncio.ensure_future(self.start_server_run(handler))
+            create_task(self.start_server_run(handler))
         return self
     async def start_server_run(self, handler):
         errwait = 0
@@ -718,7 +740,7 @@ class ProxyBackward(ProxySimple):
                     data = None
                 if data and data[0] != 0:
                     reader.rollback(data)
-                    asyncio.ensure_future(handler(reader, writer))
+                    create_task(handler(reader, writer))
                 else:
                     writer.close()
                 errwait = 0
@@ -924,7 +946,7 @@ def main(args = None):
         print('You must specify --ssl to listen in ssl mode')
         return
     if args.test:
-        asyncio.get_event_loop().run_until_complete(test_url(args.test, args.rserver))
+        asyncio.run(test_url(args.test, args.rserver))
         return
     if not args.listen and not args.ulisten:
         args.listen.append(proxies_by_uri('http+socks4+socks5://:8080/'))
@@ -950,9 +972,10 @@ def main(args = None):
     try:
         __import__('uvloop').install()
         print('Using uvloop')
-        loop = asyncio.new_event_loop()
     except ModuleNotFoundError:
-        loop = asyncio.get_event_loop()
+        pass
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     if args.v:
         from . import verbose
         verbose.setup(loop, args)
@@ -994,7 +1017,7 @@ def main(args = None):
             from . import sysproxy
             args.sys = sysproxy.setup(args)
         if args.alived > 0 and args.rserver:
-            asyncio.ensure_future(check_server_alive(args.alived, args.rserver, args.verbose if args.v else DUMMY))
+            loop.create_task(check_server_alive(args.alived, args.rserver, args.verbose if args.v else DUMMY))
         try:
             loop.run_forever()
         except KeyboardInterrupt:
