@@ -788,9 +788,18 @@ def compile_rule(filename):
     with open(filename) as f:
         return re.compile('(:?'+''.join('|'.join(i.strip() for i in f if i.strip() and not i.startswith('#')))+')$').match
 
+def split_uri_jumps(uri_jumps):
+    parts = []
+    start = 0
+    for match in re.finditer(r'__(?=[A-Za-z][A-Za-z0-9+.-]*://)', uri_jumps):
+        parts.append(uri_jumps[start:match.start()])
+        start = match.end()
+    parts.append(uri_jumps[start:])
+    return parts
+
 def proxies_by_uri(uri_jumps):
     jump = DIRECT
-    for uri in reversed(uri_jumps.split('__')):
+    for uri in reversed(split_uri_jumps(uri_jumps)):
         jump = proxy_by_uri(uri, jump)
     return jump
 
