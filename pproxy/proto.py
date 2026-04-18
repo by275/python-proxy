@@ -1,8 +1,45 @@
 import asyncio, socket, urllib.parse, time, re, base64, hmac, struct, hashlib, io, os
 from . import admin
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
+HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
 create_task = asyncio.create_task
+
+
+def _decode_header_value(value):
+    return value.decode('latin1')
+
+
+def parse_http_request_head(data):
+    request_line, *header_lines = data.split(b'\r\n')
+    match = HTTP_METHOD_LINE.match(request_line)
+    if match is None:
+        raise Exception('Unknown HTTP header')
+    method_b, path_b, ver_b = match.groups()
+    filtered_headers = []
+    host = ''
+    proxy_authorization = None
+    sec_websocket_key = None
+    for header in header_lines:
+        key, sep, value = header.partition(b': ')
+        if sep:
+            if key == b'Host':
+                host = _decode_header_value(value)
+            elif key == b'Proxy-Authorization':
+                proxy_authorization = _decode_header_value(value)
+            elif key == b'Sec-WebSocket-Key':
+                sec_websocket_key = _decode_header_value(value)
+        if not header.startswith(b'Proxy-'):
+            filtered_headers.append(header)
+    return (
+        _decode_header_value(method_b),
+        _decode_header_value(path_b),
+        _decode_header_value(ver_b),
+        b'\r\n'.join(filtered_headers),
+        host,
+        proxy_authorization,
+        sec_websocket_key,
+    )
 
 def netloc_split(loc, default_host=None, default_port=None):
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
@@ -287,18 +324,15 @@ class HTTP(BaseProtocol):
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
     async def accept(self, reader, user, writer, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
                 writer.write(body)
             if wait:
                 await writer.drain()
-        return await self.http_accept(user, method, path, None, ver, lines, headers.get('Host', ''), headers.get('Proxy-Authorization'), reply, **kw)
-    async def http_accept(self, user, method, path, authority, ver, lines, host, pauth, reply, authtable, users, httpget=None, **kw):
+        return await self.http_accept(user, method, path, None, ver, filtered_headers, host, proxy_authorization, reply, **kw)
+    async def http_accept(self, user, method, path, authority, ver, filtered_headers, host, pauth, reply, authtable, users, httpget=None, **kw):
         url = urllib.parse.urlparse(path)
         if method == 'GET' and not url.hostname:
             for path, text in (httpget.items() if httpget else ()):
@@ -326,8 +360,13 @@ class HTTP(BaseProtocol):
         else:
             host_name, port = netloc_split(url.netloc or host, default_port=80)
             newpath = url._replace(netloc='', scheme='').geturl()
+            request_head = (
+                f'{method} {newpath} {ver}\r\n'.encode() +
+                filtered_headers +
+                b'\r\n\r\n'
+            )
             async def connected(writer):
-                writer.write(f'{method} {newpath} {ver}\r\n{lines}\r\n\r\n'.encode())
+                writer.write(request_head)
                 return True
             return user, host_name, port, connected
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
@@ -344,12 +383,9 @@ class HTTP(BaseProtocol):
                     if b'\r\n\r\n' not in data:
                         data += await reader.readuntil(b'\r\n\r\n')
                     lines, data = data.split(b'\r\n\r\n', 1)
-                    headers = lines.decode().split('\r\n')
-                    method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-                    lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-                    headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+                    method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines)
                     newpath = urllib.parse.urlparse(path)._replace(netloc='', scheme='').geturl()
-                    data = f'{method} {newpath} {ver}\r\n{lines}\r\n\r\n'.encode() + data
+                    data = f'{method} {newpath} {ver}\r\n'.encode() + filtered_headers + b'\r\n\r\n' + data
                 stat_bytes(len(data))
                 writer.write(data)
                 await writer.drain()
@@ -362,20 +398,22 @@ class HTTP(BaseProtocol):
 class HTTPOnly(HTTP):
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
         buffer = bytearray()
-        HOST_NAME = re.compile('\r\nHost: ([^\r\n]+)\r\n', re.I)
+        host_name_pattern = re.compile(br'\r\nHost: ([^\r\n]+)\r\n', re.I)
         def write(data, o=writer_remote.write):
             if not data: return
             buffer.extend(data)
             pos = buffer.find(b'\r\n\r\n')
             if pos != -1:
-                text = buffer[:pos].decode()
-                header = HTTP_LINE.match(text.split('\r\n', 1)[0])
-                host = HOST_NAME.search(text)
+                request_head = buffer[:pos]
+                request_line = request_head.split(b'\r\n', 1)[0]
+                header = HTTP_METHOD_LINE.match(request_line)
+                host = host_name_pattern.search(b'\r\n' + request_head + b'\r\n')
                 if not header or not host:
                     writer_remote.close()
                     raise Exception('Unknown HTTP header for protocol HTTPOnly')
                 method, path, ver = header.groups()
-                data = f'{method} http://{host.group(1)}{path} {ver}\r\nHost: {host.group(1)}'.encode() + (b'\r\nProxy-Authorization: Basic '+base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n' + buffer[pos+4:]
+                host_value = host.group(1)
+                data = method + b' http://' + host_value + path + b' ' + ver + b'\r\nHost: ' + host_value + (b'\r\nProxy-Authorization: Basic ' + base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n' + buffer[pos+4:]
                 buffer.clear()
                 return o(data)
         writer_remote.write = write
@@ -410,10 +448,11 @@ class H3(H2):
 class HTTPAdmin(HTTP):
     async def accept(self, reader, user, writer, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
+        headers = dict(
+            i.split(': ', 1) for i in filtered_headers.decode().split('\r\n') if ': ' in i
+        )
+        lines = filtered_headers.decode()
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
@@ -544,13 +583,9 @@ class WS(BaseProtocol):
         writer.write = write
     async def accept(self, reader, user, writer, users, authtable, sock, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
-        headers = lines[:-4].decode().split('\r\n')
-        method, path, ver = HTTP_LINE.match(headers.pop(0)).groups()
-        lines = '\r\n'.join(i for i in headers if not i.startswith('Proxy-'))
-        headers = dict(i.split(': ', 1) for i in headers if ': ' in i)
+        method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
         url = urllib.parse.urlparse(path)
         if users:
-            pauth = headers.get('Proxy-Authorization', None)
             user = authtable.authed()
             if not user:
                 user = next(filter(lambda i: ('Basic '+base64.b64encode(i).decode()) == pauth, users), None)
@@ -560,9 +595,9 @@ class WS(BaseProtocol):
             authtable.set_authed(user)
         if method != 'GET':
             raise Exception(f'Unsupported method {method}')
-        if headers.get('Sec-WebSocket-Key', None) is None:
-            raise Exception(f'Unsupported headers {headers}')
-        seckey = base64.b64decode(headers.get('Sec-WebSocket-Key'))
+        if sec_websocket_key is None:
+            raise Exception('Unsupported headers for WebSocket')
+        seckey = base64.b64decode(sec_websocket_key)
         rseckey = base64.b64encode(hashlib.sha1(seckey+b'amtf').digest()[:16]).decode()
         writer.write(f'{ver} 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {rseckey}\r\nSec-WebSocket-Protocol: chat\r\n\r\n'.encode())
         self.patch_ws_stream(reader, writer, False)
