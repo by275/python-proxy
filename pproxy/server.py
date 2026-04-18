@@ -1,4 +1,4 @@
-import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys
+import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections
 from . import proto
 from . import admin
 
@@ -163,6 +163,7 @@ class ProxyDirect(object):
         self.alive = True
         self.connections = 0
         self.udpmap = {}
+        self.udp_lru = collections.OrderedDict()
     @property
     def direct(self):
         return type(self) is ProxyDirect
@@ -176,40 +177,50 @@ class ProxyDirect(object):
         return data
     def destination(self, host, port):
         return host, port
+    def udp_touch(self, addr, prot):
+        self.udpmap[addr] = prot
+        self.udp_lru[addr] = prot
+        self.udp_lru.move_to_end(addr)
+    def udp_discard(self, addr):
+        self.udp_lru.pop(addr, None)
+        return self.udpmap.pop(addr, None)
+    def udp_evict_if_needed(self):
+        if len(self.udp_lru) < UDP_LIMIT:
+            return
+        addr, prot = self.udp_lru.popitem(last=False)
+        self.udpmap.pop(addr, None)
+        if prot.transport:
+            prot.transport.close()
     async def udp_open_connection(self, host, port, data, addr, reply):
         class Protocol(asyncio.DatagramProtocol):
             def __init__(prot, data):
-                self.udpmap[addr] = prot
                 prot.databuf = [data]
                 prot.transport = None
-                prot.update = 0
+                self.udp_touch(addr, prot)
             def connection_made(prot, transport):
                 prot.transport = transport
                 for data in prot.databuf:
                     transport.sendto(data)
                 prot.databuf.clear()
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def new_data_arrived(prot, data):
                 if prot.transport:
                     prot.transport.sendto(data)
                 else:
                     prot.databuf.append(data)
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def datagram_received(prot, data, addr):
                 data = self.udp_packet_unpack(data)
                 reply(data)
-                prot.update = time.perf_counter()
+                self.udp_touch(addr, prot)
             def connection_lost(prot, exc):
-                self.udpmap.pop(addr, None)
+                self.udp_discard(addr)
         if addr in self.udpmap:
-            self.udpmap[addr].new_data_arrived(data)
+            prot = self.udpmap[addr]
+            prot.new_data_arrived(data)
         else:
             self.connection_change(1)
-            if len(self.udpmap) > UDP_LIMIT:
-                min_addr = min(self.udpmap, key=lambda x: self.udpmap[x].update)
-                prot = self.udpmap.pop(min_addr)
-                if prot.transport:
-                    prot.transport.close()
+            self.udp_evict_if_needed()
             prot = lambda: Protocol(data)
             remote = self.destination(host, port)
             loop = asyncio.get_running_loop()
