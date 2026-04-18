@@ -45,6 +45,12 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
     else:
         return None, None
 
+
+async def relay_with_taskgroup(inbound, outbound):
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(inbound)
+        tg.create_task(outbound)
+
 def schedule(rserver, salgorithm, host_name, port):
     filter_cond = lambda o: o.alive and o.match_rule(host_name, port)
     if salgorithm == 'fa':
@@ -96,8 +102,10 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
                 raise Exception('Unknown remote protocol')
             m = modstat(user, remote_ip, host_name)
             lchannel = lproto.http_channel if use_http else lproto.channel
-            create_task(lproto.channel(reader_remote, writer, m(2+roption.direct), m(4+roption.direct)))
-            create_task(lchannel(reader, writer_remote, m(roption.direct), roption.connection_change))
+            await relay_with_taskgroup(
+                lproto.channel(reader_remote, writer, m(2+roption.direct), m(4+roption.direct)),
+                lchannel(reader, writer_remote, m(roption.direct), roption.connection_change),
+            )
     except Exception as ex:
         if not isinstance(ex, asyncio.TimeoutError) and not str(ex).startswith('Connection closed'):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
