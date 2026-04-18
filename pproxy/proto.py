@@ -47,6 +47,23 @@ def parse_http_request_head(data):
         sec_websocket_key,
     )
 
+
+def decode_http_header_block(header_block):
+    header_lines = header_block.split(b'\r\n') if header_block else ()
+    headers = {}
+    for line in header_lines:
+        key, sep, value = line.partition(b': ')
+        if sep:
+            headers[_decode_header_value(key)] = _decode_header_value(value)
+    return headers, '\r\n'.join(_decode_header_value(line) for line in header_lines)
+
+
+def xor_mask_bytes(data, mask_key):
+    masked = bytearray(data)
+    for index, value in enumerate(masked):
+        masked[index] = value ^ mask_key[index % 4]
+    return bytes(masked)
+
 def netloc_split(loc, default_host=None, default_port=None):
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
     if ipv6:
@@ -62,9 +79,10 @@ async def socks_address_stream(reader, n):
         data = await reader.read_n(4)
         host_name = socket.inet_ntoa(data)
     elif n in (3, 19):
-        data = await reader.read_n(1)
-        data += await reader.read_n(data[0])
-        host_name = data[1:].decode()
+        host_length = await reader.read_n(1)
+        host_data = await reader.read_n(host_length[0])
+        data = host_length + host_data
+        host_name = host_data.decode()
     elif n in (4, 20):
         data = await reader.read_n(16)
         host_name = socket.inet_ntop(socket.AF_INET6, data)
@@ -390,7 +408,8 @@ class HTTP(BaseProtocol):
                 data = await reader.read(65536)
                 if not data:
                     break
-                if b'\r\n' in data and HTTP_LINE.match(data.split(b'\r\n', 1)[0].decode()):
+                request_line, sep, _ = data.partition(b'\r\n')
+                if sep and HTTP_METHOD_LINE.match(request_line):
                     if b'\r\n\r\n' not in data:
                         data += await reader.readuntil(b'\r\n\r\n')
                     lines, data = data.split(b'\r\n\r\n', 1)
@@ -463,10 +482,7 @@ class HTTPAdmin(HTTP):
     async def accept(self, reader, user, writer, **kw):
         lines = await reader.read_until(b'\r\n\r\n')
         method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
-        headers = dict(
-            i.split(': ', 1) for i in filtered_headers.decode().split('\r\n') if ': ' in i
-        )
-        lines = filtered_headers.decode()
+        headers, lines = decode_http_header_block(filtered_headers)
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
@@ -577,7 +593,7 @@ class WS(BaseProtocol):
                         break
                     data = _buffer[:data_len]
                     if mask_key:
-                        data = bytes(data[i]^mask_key[i%4] for i in range(data_len))
+                        data = xor_mask_bytes(data, mask_key)
                     del _buffer[:data_len]
                     data_len = None
                     o(data)
@@ -590,7 +606,7 @@ class WS(BaseProtocol):
             data_len = len(data)
             if masked:
                 mask_key = os.urandom(4)
-                data = bytes(data[i]^mask_key[i%4] for i in range(data_len))
+                data = xor_mask_bytes(data, mask_key)
                 return o(b'\x02' + (bytes([data_len|0x80]) if data_len < 126 else b'\xfe'+data_len.to_bytes(2, 'big') if data_len < 65536 else b'\xff'+data_len.to_bytes(4, 'big')) + mask_key + data)
             else:
                 return o(b'\x02' + (bytes([data_len]) if data_len < 126 else b'\x7e'+data_len.to_bytes(2, 'big') if data_len < 65536 else b'\x7f'+data_len.to_bytes(4, 'big')) + data)
