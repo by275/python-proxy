@@ -18,7 +18,7 @@ class CaptureWriter:
 
 class MalformedParserTests(unittest.TestCase):
     def test_http_parser_rejects_an_invalid_request_line(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(ProtocolError):
             proto.parse_http_request_head(b"NOT-A-REQUEST\r\nHost: example.test")
 
     def test_websocket_parser_does_not_emit_a_truncated_frame(self):
@@ -51,7 +51,7 @@ class MalformedProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_socks_address_stream_rejects_an_unknown_address_type(self):
         reader = asyncio.StreamReader()
-        with self.assertRaises(Exception):
+        with self.assertRaises(ProtocolError):
             await proto.socks_address_stream(reader, 99)
 
 
