@@ -5,7 +5,7 @@ import unittest
 
 import pproxy
 from pproxy import proto, server
-from pproxy.config import ProxyConfig
+from pproxy.config import ProxyConfig, netloc_split
 from pproxy.errors import ProtocolError
 from pproxy.protocols import address as address_protocol
 from pproxy.protocols import http as http_protocol
@@ -13,6 +13,7 @@ from pproxy.protocols import http as http_protocol
 
 class ParserContractTests(unittest.TestCase):
     def test_netloc_split_supports_defaults_and_ipv6(self):
+        self.assertIs(proto.netloc_split, netloc_split)
         self.assertEqual(proto.netloc_split("localhost:8080"), ("localhost", 8080))
         self.assertEqual(proto.netloc_split("[::1]:8443"), ("::1", 8443))
         self.assertEqual(

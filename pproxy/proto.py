@@ -5,6 +5,7 @@ from . import transport
 from . import websocket
 from .errors import require
 from . import tls
+from . import config
 from .protocols import address as address_protocol
 from .protocols import http as http_protocol
 
@@ -15,6 +16,7 @@ parse_http_request_head = http_protocol.parse_http_request_head
 decode_http_header_block = http_protocol.decode_http_header_block
 socks_address_stream = address_protocol.socks_address_stream
 socks_address = address_protocol.socks_address
+netloc_split = config.netloc_split
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
 DRAIN_BUFFER_SIZE = 256 * 1024
 
@@ -25,16 +27,6 @@ async def drain_if_needed(writer, force=False):
 
 
 xor_mask_bytes = websocket.xor_mask_bytes
-
-def netloc_split(loc, default_host=None, default_port=None):
-    ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
-    if ipv6:
-        host_name, port = ipv6.groups()
-    elif ':' in loc:
-        host_name, port = loc.rsplit(':', 1)
-    else:
-        host_name, port = loc, None
-    return host_name or default_host, int(port) if port else default_port
 
 class BaseProtocol:
     def __init__(self, param):

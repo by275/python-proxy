@@ -1,7 +1,20 @@
 """Typed internal configuration used when constructing proxy backends."""
 
+import re
 from dataclasses import dataclass, fields
 from typing import Any
+
+
+def netloc_split(loc, default_host=None, default_port=None):
+    """Split a host:port netloc while preserving bracketed IPv6 syntax."""
+    ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
+    if ipv6:
+        host_name, port = ipv6.groups()
+    elif ':' in loc:
+        host_name, port = loc.rsplit(':', 1)
+    else:
+        host_name, port = loc, None
+    return host_name or default_host, int(port) if port else default_port
 
 
 @dataclass(frozen=True, slots=True)
