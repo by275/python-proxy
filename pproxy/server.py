@@ -3,6 +3,7 @@ from asyncio import create_task
 from . import proto
 from . import admin
 from . import transport
+from .errors import require
 
 from .__doc__ import *
 
@@ -766,7 +767,7 @@ class ProxyBackward(ProxySimple):
                 auth = b'\x01'+auth
             if auth:
                 try:
-                    assert auth == (await transport.read_exactly(reader, len(auth)))
+                    require(auth == (await transport.read_exactly(reader, len(auth))))
                 except Exception:
                     return
             await self.conn.put((reader, writer, create_task(self.watch_connection(reader, writer))))
@@ -885,7 +886,7 @@ def proxy_by_uri(uri, jump):
 
 async def test_url(url, rserver):
     url = urllib.parse.urlparse(url)
-    assert url.scheme in ('http', 'https'), f'Unknown scheme {url.scheme}'
+    require(url.scheme in ('http', 'https'), f'Unknown scheme {url.scheme}')
     host_name, port = proto.netloc_split(url.netloc, default_port = 80 if url.scheme=='http' else 443)
     initbuf = f'GET {url.path or "/"} HTTP/1.1\r\nHost: {host_name}\r\nUser-Agent: pproxy-{__version__}\r\nAccept: */*\r\nConnection: close\r\n\r\n'.encode()
     for roption in rserver:

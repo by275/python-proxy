@@ -1,5 +1,6 @@
 import datetime, zlib, os, binascii, hmac, hashlib, time, random, collections
 from . import transport
+from .errors import require
 
 packstr = lambda s, n=2: len(s).to_bytes(n, 'big') + s
 toint = lambda s, o='big': int.from_bytes(s, o)
@@ -38,17 +39,17 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
     CACHE = collections.deque(maxlen = 100)
     async def init_client_data(self, reader, writer, cipher):
         key = cipher.cipher(cipher.key).key
-        assert await transport.read_exactly(reader, 3) == b'\x16\x03\x01'
+        require(await transport.read_exactly(reader, 3) == b'\x16\x03\x01')
         header = await transport.read_exactly(reader, toint(await transport.read_exactly(reader, 2)))
-        assert header[:2] == b'\x01\x00'
-        assert header[4:6] == b'\x03\x03'
+        require(header[:2] == b'\x01\x00')
+        require(header[4:6] == b'\x03\x03')
         cacheid = header[6:28]
         sessionid = header[39:39+header[38]]
-        assert cacheid not in self.CACHE
+        require(cacheid not in self.CACHE)
         self.CACHE.append(cacheid)
         utc_time = int(time.time())
-        assert hmac.new(key+sessionid, cacheid, hashlib.sha1).digest()[:10] == header[28:38]
-        assert abs(toint(header[6:10]) - utc_time) < TIMESTAMP_TOLERANCE
+        require(hmac.new(key+sessionid, cacheid, hashlib.sha1).digest()[:10] == header[28:38])
+        require(abs(toint(header[6:10]) - utc_time) < TIMESTAMP_TOLERANCE)
         addhmac = lambda s: s + hmac.new(key+sessionid, s, hashlib.sha1).digest()[:10]
         writer.write(addhmac((b"\x16\x03\x03" + packstr(b"\x02\x00" + packstr(b'\x03\x03' + addhmac(utc_time.to_bytes(4, 'big') + os.urandom(18)) + b'\x20' + sessionid + b'\xc0\x2f\x00\x00\x05\xff\x01\x00\x01\x00')) + (b"\x16\x03\x03" + packstr(b"\x04\x00" + packstr(os.urandom(random.randrange(164)*2+64))) if random.randint(0, 8) < 1 else b'') + b"\x14\x03\x03\x00\x01\x01\x16\x03\x03" + packstr(os.urandom(random.choice((32, 40)))))[:-10]))
 
@@ -71,7 +72,7 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
                 if self.buf[:3] in (b'\x16\x03\x03', b'\x14\x03\x03'):
                     del self.buf[:5+l]
                     continue
-                assert self.buf[:3] == b'\x17\x03\x03'
+                require(self.buf[:3] == b'\x17\x03\x03')
                 data = self.buf[5:5+l]
                 ret += data
                 del self.buf[:5+l]
@@ -102,7 +103,7 @@ class Verify_Simple_Plugin(BasePlugin):
                     break
                 data = self.buf[2+self.buf[2]:l-4]
                 crc = (-1 - binascii.crc32(self.buf[:l-4])) & 0xffffffff
-                assert int.from_bytes(self.buf[l-4:l], 'little') == crc
+                require(int.from_bytes(self.buf[l-4:l], 'little') == crc)
                 ret += data
                 del self.buf[:l]
             return ret

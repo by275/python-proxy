@@ -1,5 +1,7 @@
 import os, sys, subprocess, struct
 
+from .errors import require
+
 class MacSetting(object):
 	def __init__(self, args):
 		self.device = None
@@ -59,7 +61,7 @@ class WindowsSetting(object):
 		import winreg
 		key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
 		value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
-		assert regtype == winreg.REG_BINARY
+		require(regtype == winreg.REG_BINARY)
 		server = f'localhost:{self.listen.port}'.encode()
 		bypass = '<local>'.encode()
 		counter = int.from_bytes(value[4:8], 'little') + 1
@@ -72,7 +74,7 @@ class WindowsSetting(object):
 		import winreg
 		key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
 		value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
-		assert regtype == winreg.REG_BINARY
+		require(regtype == winreg.REG_BINARY)
 		counter = int.from_bytes(value[4:8], 'little') + 1
 		value = value[:4] + struct.pack('<II', counter, 1) + b'\x00'*44
 		winreg.SetValueEx(key, self.SUBKEY, None, regtype, value)

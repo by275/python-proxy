@@ -2,6 +2,7 @@ import asyncio, socket, urllib.parse, re, base64, hmac, struct, hashlib, io, os
 from asyncio import create_task
 from . import admin
 from . import transport
+from .errors import require
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
@@ -153,11 +154,11 @@ class Trojan(BaseProtocol):
                 return True
         transport.rollback(reader, header)
     async def accept(self, reader, user, **kw):
-        assert await transport.read_exactly(reader, 2) == b'\x0d\x0a'
+        require(await transport.read_exactly(reader, 2) == b'\x0d\x0a')
         if (await transport.read_exactly(reader, 1))[0] != 1:
             raise Exception('Connection closed')
         host_name, port, _ = await socks_address_stream(reader, (await transport.read_exactly(reader, 1))[0])
-        assert await transport.read_exactly(reader, 2) == b'\x0d\x0a'
+        require(await transport.read_exactly(reader, 2) == b'\x0d\x0a')
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         toauth = hashlib.sha224(rauth or b'').hexdigest().encode()
@@ -199,7 +200,7 @@ class SS(SSR):
                     if len(_buffer) < 10+data_len:
                         break
                     data = _buffer[10:10+data_len]
-                    assert _buffer[:10] == hmac.new(cipher.iv+chunk_id.to_bytes(4, 'big'), data, hashlib.sha1).digest()[:10]
+                    require(_buffer[:10] == hmac.new(cipher.iv+chunk_id.to_bytes(4, 'big'), data, hashlib.sha1).digest()[:10])
                     del _buffer[:10+data_len]
                     data_len = None
                     chunk_id += 1
@@ -222,10 +223,10 @@ class SS(SSR):
         header = await transport.read_exactly(reader, 1)
         ota = (header[0] & 0x10 == 0x10)
         host_name, port, data = await socks_address_stream(reader, header[0])
-        assert ota or not reader_cipher or not reader_cipher.ota, 'SS client must support OTA'
+        require(ota or not reader_cipher or not reader_cipher.ota, 'SS client must support OTA')
         if ota and reader_cipher:
             checksum = hmac.new(reader_cipher.iv+reader_cipher.key, header+data, hashlib.sha1).digest()
-            assert checksum[:10] == await transport.read_exactly(reader, 10), 'Unknown OTA checksum'
+            require(checksum[:10] == await transport.read_exactly(reader, 10), 'Unknown OTA checksum')
             self.patch_ota_reader(reader_cipher, reader)
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, writer_cipher_r, **kw):
@@ -271,7 +272,7 @@ class Socks4(BaseProtocol):
             return True
         transport.rollback(reader, header)
     async def accept(self, reader, user, writer, users, authtable, **kw):
-        assert await transport.read_exactly(reader, 1) == b'\x01'
+        require(await transport.read_exactly(reader, 1) == b'\x01')
         port = int.from_bytes(await transport.read_exactly(reader, 2), 'big')
         ip = await transport.read_exactly(reader, 4)
         userid = (await transport.read_until(reader, b'\x00'))[:-1]
@@ -288,7 +289,7 @@ class Socks4(BaseProtocol):
         loop = asyncio.get_running_loop()
         ip = socket.inet_aton((await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
         writer_remote.write(b'\x04\x01' + port.to_bytes(2, 'big') + ip + rauth + b'\x00')
-        assert await transport.read_exactly(reader_remote, 2) == b'\x00\x5a'
+        require(await transport.read_exactly(reader_remote, 2) == b'\x00\x5a')
         await transport.read_exactly(reader_remote, 6)
 
 class Socks5(BaseProtocol):
@@ -304,7 +305,7 @@ class Socks5(BaseProtocol):
             if b'\x02' not in methods:
                 raise Exception(f'Unauthorized SOCKS')
             writer.write(b'\x05\x02')
-            assert (await transport.read_exactly(reader, 1))[0] == 1, 'Unknown SOCKS auth'
+            require((await transport.read_exactly(reader, 1))[0] == 1, 'Unknown SOCKS auth')
             u = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             p = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             user = u+b':'+p
@@ -317,7 +318,7 @@ class Socks5(BaseProtocol):
             writer.write(b'\x05\x00')
         if users:
             authtable.set_authed(user)
-        assert await transport.read_exactly(reader, 3) == b'\x05\x01\x00', 'Unknown SOCKS protocol'
+        require(await transport.read_exactly(reader, 3) == b'\x05\x01\x00', 'Unknown SOCKS protocol')
         header = await transport.read_exactly(reader, 1)
         host_name, port, data = await socks_address_stream(reader, header[0])
         writer.write(b'\x05\x00\x00' + header + data)
@@ -325,14 +326,14 @@ class Socks5(BaseProtocol):
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         if rauth:
             writer_remote.write(b'\x05\x01\x02')
-            assert await transport.read_exactly(reader_remote, 2) == b'\x05\x02'
+            require(await transport.read_exactly(reader_remote, 2) == b'\x05\x02')
             writer_remote.write(b'\x01' + b''.join(packstr(i) for i in rauth.split(b':', 1)))
-            assert await transport.read_exactly(reader_remote, 2) == b'\x01\x00', 'Unknown SOCKS auth'
+            require(await transport.read_exactly(reader_remote, 2) == b'\x01\x00', 'Unknown SOCKS auth')
         else:
             writer_remote.write(b'\x05\x01\x00')
-            assert await transport.read_exactly(reader_remote, 2) == b'\x05\x00'
+            require(await transport.read_exactly(reader_remote, 2) == b'\x05\x00')
         writer_remote.write(b'\x05\x01\x00\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big'))
-        assert await transport.read_exactly(reader_remote, 3) == b'\x05\x00\x00'
+        require(await transport.read_exactly(reader_remote, 3) == b'\x05\x00\x00')
         header = (await transport.read_exactly(reader_remote, 1))[0]
         await transport.read_exactly(reader_remote, 6 if header == 1 else (18 if header == 4 else (await transport.read_exactly(reader_remote, 1))[0]+2))
     def udp_accept(self, data, **kw):
@@ -534,11 +535,11 @@ class Redir(Transparent):
             #if sock.family == socket.AF_INET:
             if "." in sock.getsockname()[0]:
                 buf = sock.getsockopt(socket.SOL_IP, SO_ORIGINAL_DST, 16)
-                assert len(buf) == 16
+                require(len(buf) == 16)
                 return socket.inet_ntoa(buf[4:8]), int.from_bytes(buf[2:4], 'big')
             else:
                 buf = sock.getsockopt(SOL_IPV6, SO_ORIGINAL_DST, 28)
-                assert len(buf) == 28
+                require(len(buf) == 28)
                 return socket.inet_ntop(socket.AF_INET6, buf[8:24]), int.from_bytes(buf[2:4], 'big')
         except Exception:
             pass

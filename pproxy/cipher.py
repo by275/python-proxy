@@ -1,5 +1,6 @@
 import os, hashlib, hmac
 from . import transport
+from .errors import require
 
 class BaseCipher(object):
     PYTHON = False
@@ -59,7 +60,7 @@ class AEADCipher(BaseCipher):
                     if len(self._buffer) < 2+self.TAG_LENGTH:
                         break
                     self._declen = int.from_bytes(self.decrypt_and_verify(self._buffer[:2], self._buffer[2:2+self.TAG_LENGTH]), 'big')
-                    assert self._declen <= self.PACKET_LIMIT
+                    require(self._declen <= self.PACKET_LIMIT)
                     del self._buffer[:2+self.TAG_LENGTH]
                 else:
                     if len(self._buffer) < self._declen+self.TAG_LENGTH:
@@ -223,7 +224,8 @@ def get_cipher(cipher_key):
     cipher = MAP.get(cipher_name)
     if cipher:
         try:
-            assert __import__('Crypto').version_info >= (3, 4)
+            if __import__('Crypto').version_info < (3, 4):
+                cipher = None
         except Exception:
             cipher = None
     if cipher is None:
