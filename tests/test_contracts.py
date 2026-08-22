@@ -94,6 +94,13 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIs(proto.BaseProtocol, base_protocol.BaseProtocol)
         self.assertIs(proto.Direct, base_protocol.Direct)
 
+    def test_http_protocol_classes_are_reexported_by_legacy_module(self):
+        self.assertIs(proto.HTTP, http_protocol.HTTP)
+        self.assertIs(proto.HTTPOnly, http_protocol.HTTPOnly)
+        self.assertIs(proto.H2, http_protocol.H2)
+        self.assertIs(proto.H3, http_protocol.H3)
+        self.assertIs(proto.HTTPAdmin, http_protocol.HTTPAdmin)
+
     def test_auth_table_state_is_instance_local(self):
         first = server.AuthTable("192.0.2.10", 60)
         second = server.AuthTable("192.0.2.10", 60)
