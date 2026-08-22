@@ -212,6 +212,61 @@ class PacketCipher:
         cipher = self.cipher()
         return cipher.iv+cipher.encrypt(data)
 
+
+class StreamCipherAdapter:
+    """Attach a stream cipher and its plugin chain to asyncio streams."""
+
+    def __init__(self, cipher, key, reader, writer, pdecrypt, pdecrypt2, pencrypt, pencrypt2, ota=False):
+        self.reader = reader
+        self.writer = writer
+        self.pdecrypt = pdecrypt
+        self.pdecrypt2 = pdecrypt2
+        self.pencrypt = pencrypt
+        self.pencrypt2 = pencrypt2
+        self.reader_cipher = cipher(key, ota=ota)
+        self.writer_cipher = cipher(key, ota=ota)
+        self.reader_cipher._buffer = b''
+        self._raw_read = reader.feed_data
+        self._raw_write = writer.write
+
+    def decrypt(self, data):
+        data = self.pdecrypt2(data)
+        if not self.reader_cipher.iv:
+            data = self.reader_cipher._buffer + data
+            if len(data) >= self.reader_cipher.IV_LENGTH:
+                self.reader_cipher.setup_iv(data[:self.reader_cipher.IV_LENGTH])
+                return self.pdecrypt(self.reader_cipher.decrypt(data[self.reader_cipher.IV_LENGTH:]))
+            self.reader_cipher._buffer = data
+            return b''
+        return self.pdecrypt(self.reader_cipher.decrypt(data))
+
+    def feed_data(self, data):
+        for decrypt in self.reader.decrypts:
+            data = decrypt(data)
+            if not data:
+                return
+        self._raw_read(data)
+
+    def write(self, data):
+        if not self.writer_cipher.iv:
+            self.writer_cipher.setup_iv()
+            self._raw_write(self.pencrypt2(self.writer_cipher.iv))
+        if not data:
+            return
+        return self._raw_write(self.pencrypt2(self.writer_cipher.encrypt(self.pencrypt(data))))
+
+    def attach(self):
+        if hasattr(self.reader, 'decrypts'):
+            self.reader.decrypts.append(self.decrypt)
+        else:
+            self.reader.decrypts = [self.decrypt]
+            self.reader.feed_data = self.feed_data
+            buffered = transport.take_buffer(self.reader)
+            if buffered:
+                self.feed_data(buffered)
+        self.writer.write = self.write
+        return self.reader_cipher, self.writer_cipher
+
 MAP = {cls.name(): cls for name, cls in globals().items() if name.endswith('_Cipher')}
 
 def get_cipher(cipher_key):
@@ -237,43 +292,17 @@ def get_cipher(cipher_key):
         return 'this cipher needs library: "pip3 install pycryptodome"', None
     cipher_name += ('-py' if cipher.PYTHON else '')
     def apply_cipher(reader, writer, pdecrypt, pdecrypt2, pencrypt, pencrypt2):
-        reader_cipher, writer_cipher = cipher(key, ota=ota), cipher(key, ota=ota)
-        reader_cipher._buffer = b''
-        def decrypt(s):
-            s = pdecrypt2(s)
-            if not reader_cipher.iv:
-                s = reader_cipher._buffer + s
-                if len(s) >= reader_cipher.IV_LENGTH:
-                    reader_cipher.setup_iv(s[:reader_cipher.IV_LENGTH])
-                    return pdecrypt(reader_cipher.decrypt(s[reader_cipher.IV_LENGTH:]))
-                else:
-                    reader_cipher._buffer = s
-                    return b''
-            else:
-                return pdecrypt(reader_cipher.decrypt(s))
-        if hasattr(reader, 'decrypts'):
-            reader.decrypts.append(decrypt)
-        else:
-            reader.decrypts = [decrypt]
-            def feed_data(s, o=reader.feed_data, p=reader.decrypts):
-                for decrypt in p:
-                    s = decrypt(s)
-                    if not s:
-                        return
-                o(s)
-            reader.feed_data = feed_data
-            buffered = transport.take_buffer(reader)
-            if buffered:
-                feed_data(buffered)
-        def write(s, o=writer.write):
-            if not writer_cipher.iv:
-                writer_cipher.setup_iv()
-                o(pencrypt2(writer_cipher.iv))
-            if not s:
-                return
-            return o(pencrypt2(writer_cipher.encrypt(pencrypt(s))))
-        writer.write = write
-        return reader_cipher, writer_cipher
+        return StreamCipherAdapter(
+            cipher,
+            key,
+            reader,
+            writer,
+            pdecrypt,
+            pdecrypt2,
+            pencrypt,
+            pencrypt2,
+            ota,
+        ).attach()
     apply_cipher.cipher = cipher
     apply_cipher.key = key
     apply_cipher.name = cipher_name
