@@ -2,33 +2,30 @@
 
 import asyncio
 
-
 DEFAULT_TIMEOUT = 60
 
 
 async def read(reader, size, timeout=DEFAULT_TIMEOUT):
     """Read up to *size* bytes with the proxy socket timeout."""
-    operation = reader.read_w(size) if hasattr(reader, "read_w") else reader.read(size)
+    if hasattr(reader, "read_w"):
+        return await reader.read_w(size)
+    operation = reader.read(size)
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
 async def read_exactly(reader, size, timeout=DEFAULT_TIMEOUT):
     """Read exactly *size* bytes with the proxy socket timeout."""
-    operation = (
-        reader.read_n(size)
-        if hasattr(reader, "read_n")
-        else reader.readexactly(size)
-    )
+    if hasattr(reader, "read_n"):
+        return await reader.read_n(size)
+    operation = reader.readexactly(size)
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
 async def read_until(reader, separator, timeout=DEFAULT_TIMEOUT):
     """Read through *separator* with the proxy socket timeout."""
-    operation = (
-        reader.read_until(separator)
-        if hasattr(reader, "read_until")
-        else reader.readuntil(separator)
-    )
+    if hasattr(reader, "read_until"):
+        return await reader.read_until(separator)
+    operation = reader.readuntil(separator)
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
