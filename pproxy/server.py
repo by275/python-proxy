@@ -3,6 +3,7 @@ from asyncio import create_task
 from . import proto
 from . import admin
 from . import transport
+from .config import ProxyConfig
 from .errors import require
 
 from .__doc__ import *
@@ -868,8 +869,20 @@ def proxy_by_uri(uri, jump):
     if 'direct' in protonames:
         return ProxyDirect(lbind=lbind)
     else:
-        params = dict(jump=jump, protos=protos, cipher=cipher, users=users, rule=url.query, bind=loc or urlpath,
-                      host_name=host_name, port=port, unix=not loc, lbind=lbind, sslclient=sslclient, sslserver=sslserver)
+        params = ProxyConfig(
+            jump=jump,
+            protos=protos,
+            cipher=cipher,
+            users=users,
+            rule=url.query,
+            bind=loc or urlpath,
+            host_name=host_name,
+            port=port,
+            unix=not loc,
+            lbind=lbind,
+            sslclient=sslclient,
+            sslserver=sslserver,
+        ).as_kwargs()
         if 'quic' in rawprotos:
             proxy = ProxyQUIC(quicserver, quicclient, **params)
         elif 'h3' in protonames:
