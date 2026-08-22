@@ -334,7 +334,7 @@ class ProxyH2(ProxySimple):
         writer.write(conn.data_to_send())
         while not reader.at_eof() and not writer.is_closing():
             try:
-                data = await reader.read(65636)
+                data = await transport.read(reader, 65636)
                 if not data:
                     break
                 events = conn.receive_data(data)
@@ -620,7 +620,7 @@ class ProxySSH(ProxySimple):
         reader = asyncio.StreamReader()
         async def channel():
             while not ssh_reader.at_eof() and not writer.is_closing():
-                buf = await ssh_reader.read(65536)
+                buf = await transport.read(ssh_reader, 65536)
                 if not buf:
                     break
                 reader.feed_data(buf)
@@ -697,7 +697,7 @@ class ProxyBackward(ProxySimple):
         self.conn = asyncio.Queue()
     async def watch_connection(self, reader, writer):
         try:
-            data = await reader.read(1)
+            data = await transport.read(reader, 1)
             if data:
                 transport.rollback(reader, data)
         except Exception:
@@ -911,7 +911,7 @@ async def test_url(url, rserver):
         print(f'--------------------------------')
         body = bytearray()
         while not reader.at_eof():
-            s = await reader.read(65536)
+            s = await transport.read(reader, 65536)
             if not s:
                 break
             body.extend(s)

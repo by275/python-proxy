@@ -121,7 +121,7 @@ class BaseProtocol:
             stat_conn(1)
             pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
-                data = await reader.read(65536)
+                data = await transport.read(reader, 65536)
                 if not data:
                     break
                 if stat_bytes is None:
@@ -407,7 +407,7 @@ class HTTP(BaseProtocol):
             stat_conn(1)
             pending_drain = 0
             while not reader.at_eof() and not writer.is_closing():
-                data = await reader.read(65536)
+                data = await transport.read(reader, 65536)
                 if not data:
                     break
                 request_line, sep, _ = data.partition(b'\r\n')
@@ -736,7 +736,7 @@ def sslwrap(reader, writer, sslcontext, server_side=False, server_hostname=None,
             buffer=ssl.get_buffer(read_size)
         try:
             while not reader.at_eof() and not ssl._app_transport._closed:
-                data = await reader.read(read_size)
+                data = await transport.read(reader, read_size)
                 if not data:
                     break
                 if buffer!=None:
