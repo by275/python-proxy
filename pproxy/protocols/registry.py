@@ -32,6 +32,7 @@ MAPPINGS = dict(
     h3=H3,
     ssl='',
     secure='',
+    insecure='',
     quic='',
 )
 MAPPINGS['in'] = ''
@@ -72,6 +73,7 @@ PROTOCOL_METADATA: dict[str, ProtocolMetadata] = {
     'quic': ProtocolMetadata(False, True, True, True, 'aioquic'),
     'ssl': ProtocolMetadata(False, False, False, False, transport_modifier=True),
     'secure': ProtocolMetadata(False, False, False, False, transport_modifier=True),
+    'insecure': ProtocolMetadata(False, False, False, False, transport_modifier=True),
     'in': ProtocolMetadata(False, False, False, False, transport_modifier=True),
 }
 

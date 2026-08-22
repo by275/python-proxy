@@ -13,6 +13,7 @@ from .__doc__ import *
 
 SOCKET_TIMEOUT = transport.DEFAULT_TIMEOUT
 UDP_LIMIT = 30
+UDP_TASK_LIMIT = 256
 DUMMY = lambda s: s
 
 class AuthTable(object):
@@ -30,6 +31,7 @@ class AuthTable(object):
 
 async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
     if cipher:
+        cipher = cipher.for_connection()
         cipher.pdecrypt = cipher.pdecrypt2 = cipher.pencrypt = cipher.pencrypt2 = DUMMY
         for plugin in cipher.plugins:
             if server_side:
@@ -218,7 +220,7 @@ class ProxyDirect(object):
                 else:
                     prot.databuf.append(data)
                 self.udp_touch(addr, prot)
-            def datagram_received(prot, data, addr):
+            def datagram_received(prot, data, upstream_addr):
                 data = self.udp_packet_unpack(data)
                 reply(data)
                 self.udp_touch(addr, prot)
@@ -286,7 +288,8 @@ DIRECT = ProxyDirect()
 
 class ProxySimple(ProxyDirect):
     def __init__(self, jump, protos, cipher, users, rule, bind,
-                  host_name, port, unix, lbind, sslclient, sslserver):
+                  host_name, port, unix, lbind, sslclient, sslserver,
+                  insecure_host_key=False):
         super().__init__(lbind)
         self.protos = protos
         self.cipher = cipher
@@ -298,7 +301,9 @@ class ProxySimple(ProxyDirect):
         self.unix = unix
         self.sslclient = sslclient
         self.sslserver = sslserver
+        self.insecure_host_key = insecure_host_key
         self.jump = jump
+        self.udp_semaphore = asyncio.Semaphore(UDP_TASK_LIMIT)
     def logtext(self, host, port):
         return f' -> {self.rproto.name+("+ssl" if self.sslclient else "")} {self.bind}' + self.jump.logtext(host, port)
     def match_rule(self, host, port):
@@ -326,9 +331,11 @@ class ProxySimple(ProxyDirect):
             def connection_made(prot, transport):
                 prot.transport = transport
             def datagram_received(prot, data, addr):
-                self.task_registry.create_task(
-                    datagram_handler(prot.transport, data, addr, **vars(self), **args)
-                )
+                async def handle_datagram():
+                    async with self.udp_semaphore:
+                        await datagram_handler(prot.transport, data, addr, **vars(self), **args)
+
+                self.task_registry.create_task(handle_datagram(), name='udp-datagram')
         loop = asyncio.get_running_loop()
         return loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
     def wait_open_connection(self, host, port, local_addr, family):
@@ -467,6 +474,12 @@ def compile_rule(filename: str) -> Callable[[str], Any]:
     with open(filename) as f:
         return re.compile('(:?'+''.join('|'.join(i.strip() for i in f if i.strip() and not i.startswith('#')))+')$').match
 
+
+def is_unauthenticated_wildcard(option: Any) -> bool:
+    """Return whether a listener can accept unauthenticated public traffic."""
+    host = getattr(option, 'host_name', None)
+    return not getattr(option, 'unix', False) and host in (None, '', '0.0.0.0', '::') and not getattr(option, 'users', None)
+
 def split_uri_jumps(uri_jumps: str) -> list[str]:
     """Split chained proxy URIs while preserving URI contents."""
     parts = []
@@ -513,7 +526,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
             raise Exception('Missing library: "pip3 install aioquic"')
         quicserver = aioquic.quic.configuration.QuicConfiguration(is_client=False, max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT)
         quicclient = aioquic.quic.configuration.QuicConfiguration(max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT*5)
-        quicclient.verify_mode = ssl.CERT_NONE
+        quicclient.verify_mode = ssl.CERT_NONE if 'ssl' in rawprotos else ssl.CERT_REQUIRED
         sslcontexts.append(quicserver)
         sslcontexts.append(quicclient)
     if 'h2' in rawprotos:
@@ -555,6 +568,8 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
     else:
         auth = url.fragment.encode()
     users = [i.rstrip() for i in auth.split(b'\n')] if auth else None
+    if 'httpadmin' in protonames and not users:
+        raise argparse.ArgumentTypeError('httpadmin requires credentials in the URI fragment')
     if 'direct' in protonames:
         return ProxyDirect(lbind=lbind)
     else:
@@ -571,6 +586,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
             lbind=lbind,
             sslclient=sslclient,
             sslserver=sslserver,
+            insecure_host_key='insecure' in rawprotos and 'ssh' in rawprotos,
         ).as_kwargs()
         if 'quic' in rawprotos:
             proxy = ProxyQUIC(quicserver, quicclient, **params)
@@ -605,8 +621,6 @@ async def test_url(url, rserver):
         if url.scheme == 'https':
             import ssl
             sslclient = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-            sslclient.check_hostname = False
-            sslclient.verify_mode = ssl.CERT_NONE
             reader, writer = proto.sslwrap(reader, writer, sslclient, False, host_name)
         writer.write(initbuf)
         headers = await transport.read_until(reader, b'\r\n\r\n')

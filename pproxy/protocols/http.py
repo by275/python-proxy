@@ -265,9 +265,11 @@ class H3(H2):
 
 
 class HTTPAdmin(HTTP):
+    MAX_HEADER_SIZE = 32 * 1024
+
     async def accept(self, reader, user, writer, **kw):
-        lines = await transport.read_until(reader, b'\r\n\r\n')
-        method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
+        lines = await transport.read_until(reader, b'\r\n\r\n', limit=self.MAX_HEADER_SIZE)
+        method, path, ver, filtered_headers, _, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         headers, lines = decode_http_header_block(filtered_headers)
 
         async def reply(code, message, body=None, wait=False):
@@ -277,8 +279,31 @@ class HTTPAdmin(HTTP):
             if wait:
                 await drain_if_needed(writer, force=True)
 
-        content_length = int(headers.get('Content-Length', '0'))
-        content = ''
+        users = kw.get('users') or ()
+        authorization = next(
+            (value for key, value in headers.items() if key.casefold() in {'authorization', 'proxy-authorization'}),
+            proxy_authorization,
+        )
+        authorized = next(
+            (candidate for candidate in users if authorization == 'Basic ' + base64.b64encode(candidate).decode()),
+            None,
+        )
+        if authorized is None:
+            writer.write(
+                f'{ver} 401 Unauthorized\r\nConnection: close\r\n'
+                'WWW-Authenticate: Basic realm="pproxy-admin"\r\n\r\n'.encode()
+            )
+            await drain_if_needed(writer, force=True)
+            raise Exception('Unauthorized HTTP admin')
+
+        try:
+            content_length = int(headers.get('Content-Length', '0'))
+        except ValueError as exc:
+            raise Exception('Invalid Content-Length') from exc
+        if content_length < 0 or content_length > admin.MAX_ADMIN_BODY:
+            await reply('413 Payload Too Large', f'{ver} 413 Payload Too Large\r\nConnection: close\r\n\r\n'.encode(), wait=True)
+            raise Exception('HTTP admin request body too large')
+        content = b''
         if content_length > 0:
             content = await transport.read_exactly(reader, content_length)
 

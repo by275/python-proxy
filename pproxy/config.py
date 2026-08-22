@@ -39,6 +39,7 @@ class ProxyConfig:
     lbind: Any
     sslclient: Any
     sslserver: Any
+    insecure_host_key: bool = False
 
     def as_kwargs(self) -> dict[str, Any]:
         """Return constructor arguments without exposing dataclass internals."""

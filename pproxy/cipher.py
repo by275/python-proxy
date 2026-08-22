@@ -1,6 +1,9 @@
-import os, hashlib, hmac
+import copy
+import os
+import hashlib
+import hmac
 from . import transport
-from .errors import require
+from .errors import ProtocolError, require
 
 class BaseCipher(object):
     PYTHON = False
@@ -68,8 +71,10 @@ class AEADCipher(BaseCipher):
                     ret.extend(self.decrypt_and_verify(self._buffer[:self._declen], self._buffer[self._declen:self._declen+self.TAG_LENGTH]))
                     del self._buffer[:self._declen+self.TAG_LENGTH]
                     self._declen = None
-        except Exception:
-            return bytes([0])
+        except Exception as exc:
+            self._buffer.clear()
+            self._declen = None
+            raise ProtocolError('invalid AEAD packet') from exc
         return bytes(ret)
     def encrypt(self, s):
         ret = bytearray()
@@ -241,10 +246,16 @@ class StreamCipherAdapter:
         return self.pdecrypt(self.reader_cipher.decrypt(data))
 
     def feed_data(self, data):
-        for decrypt in self.reader.decrypts:
-            data = decrypt(data)
-            if not data:
-                return
+        try:
+            for decrypt in self.reader.decrypts:
+                data = decrypt(data)
+                if not data:
+                    return
+        except ProtocolError:
+            close = getattr(self.writer, 'close', None)
+            if close is not None:
+                close()
+            raise
         self._raw_read(data)
 
     def write(self, data):
@@ -266,6 +277,41 @@ class StreamCipherAdapter:
                 self.feed_data(buffered)
         self.writer.write = self.write
         return self.reader_cipher, self.writer_cipher
+
+class CipherFactory:
+    """Immutable cipher configuration that creates connection-local sessions."""
+
+    def __init__(self, cipher, key, name, ota=False, plugins=None):
+        self.cipher = cipher
+        self.key = key
+        self.name = name
+        self.ota = ota
+        self.plugins = list(plugins or ())
+        self.datagram = PacketCipher(cipher, key, name)
+
+    def __call__(self, reader, writer, pdecrypt, pdecrypt2, pencrypt, pencrypt2):
+        return StreamCipherAdapter(
+            self.cipher,
+            self.key,
+            reader,
+            writer,
+            pdecrypt,
+            pdecrypt2,
+            pencrypt,
+            pencrypt2,
+            self.ota,
+        ).attach()
+
+    def for_connection(self):
+        """Return a session whose plugin state belongs to one connection."""
+        return CipherFactory(
+            self.cipher,
+            self.key,
+            self.name,
+            self.ota,
+            (copy.deepcopy(plugin) for plugin in self.plugins),
+        )
+
 
 MAP = {cls.name(): cls for name, cls in globals().items() if name.endswith('_Cipher')}
 
@@ -291,22 +337,4 @@ def get_cipher(cipher_key):
     if cipher is None:
         return 'this cipher needs library: "pip3 install pycryptodome"', None
     cipher_name += ('-py' if cipher.PYTHON else '')
-    def apply_cipher(reader, writer, pdecrypt, pdecrypt2, pencrypt, pencrypt2):
-        return StreamCipherAdapter(
-            cipher,
-            key,
-            reader,
-            writer,
-            pdecrypt,
-            pdecrypt2,
-            pencrypt,
-            pencrypt2,
-            ota,
-        ).attach()
-    apply_cipher.cipher = cipher
-    apply_cipher.key = key
-    apply_cipher.name = cipher_name
-    apply_cipher.ota = ota
-    apply_cipher.plugins = []
-    apply_cipher.datagram = PacketCipher(cipher, key, cipher_name)
-    return None, apply_cipher
+    return None, CipherFactory(cipher, key, cipher_name, ota)

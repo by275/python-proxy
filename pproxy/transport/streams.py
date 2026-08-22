@@ -29,12 +29,17 @@ async def read_until(
     reader: Any,
     separator: bytes,
     timeout: float | None = DEFAULT_TIMEOUT,
+    limit: int | None = None,
 ) -> bytes:
     """Read through *separator* with the proxy socket timeout."""
     if hasattr(reader, "read_until"):
-        return await reader.read_until(separator)
-    operation = reader.readuntil(separator)
-    return await asyncio.wait_for(operation, timeout=timeout)
+        result = await reader.read_until(separator)
+    else:
+        operation = reader.readuntil(separator)
+        result = await asyncio.wait_for(operation, timeout=timeout)
+    if limit is not None and len(result) > limit:
+        raise ValueError(f"stream data exceeds limit of {limit} bytes")
+    return result
 
 
 def rollback(reader: Any, data: bytes) -> None:
