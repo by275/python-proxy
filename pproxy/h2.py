@@ -4,7 +4,7 @@ import asyncio
 import functools
 from asyncio import create_task
 
-from . import proto, transport
+from . import proto
 from . import server as runtime
 
 
@@ -34,9 +34,10 @@ class ProxyH2(runtime.ProxySimple):
         streams = {}
         conn.initiate_connection()
         writer.write(conn.data_to_send())
+        read = reader.read
         while not reader.at_eof() and not writer.is_closing():
             try:
-                data = await transport.read(reader, 65636)
+                data = await read(65636)
                 if not data:
                     break
                 events = conn.receive_data(data)

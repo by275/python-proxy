@@ -50,6 +50,12 @@ class TransportHelperTests(unittest.IsolatedAsyncioTestCase):
             [("read", 4), ("readexactly", 3), ("readuntil", b"\r\n")],
         )
 
+    async def test_streaming_read_can_skip_timeout_wrapper(self):
+        reader = FakeReader()
+
+        self.assertEqual(await transport.read(reader, 4, timeout=None), b"data")
+        self.assertEqual(reader.calls, [("read", 4)])
+
     async def test_rollback_uses_a_stream_reader_buffer(self):
         reader = asyncio.StreamReader()
         reader.feed_data(b"GET / HTTP/1.1")

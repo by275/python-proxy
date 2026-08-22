@@ -119,8 +119,9 @@ class BaseProtocol:
         try:
             stat_conn(1)
             pending_drain = 0
+            read = reader.read
             while not reader.at_eof() and not writer.is_closing():
-                data = await transport.read(reader, 65536)
+                data = await read(65536)
                 if not data:
                     break
                 if stat_bytes is None:
@@ -405,8 +406,9 @@ class HTTP(BaseProtocol):
         try:
             stat_conn(1)
             pending_drain = 0
+            read = reader.read
             while not reader.at_eof() and not writer.is_closing():
-                data = await transport.read(reader, 65536)
+                data = await read(65536)
                 if not data:
                     break
                 request_line, sep, _ = data.partition(b'\r\n')

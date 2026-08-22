@@ -4,7 +4,6 @@ import asyncio
 from asyncio import create_task
 
 from . import server as runtime
-from . import transport
 
 
 class ProxySSH(runtime.ProxySimple):
@@ -21,8 +20,9 @@ class ProxySSH(runtime.ProxySimple):
         reader = asyncio.StreamReader()
 
         async def channel():
+            read = ssh_reader.read
             while not ssh_reader.at_eof() and not writer.is_closing():
-                buf = await transport.read(ssh_reader, 65536)
+                buf = await read(65536)
                 if not buf:
                     break
                 reader.feed_data(buf)

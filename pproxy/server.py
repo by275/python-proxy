@@ -335,7 +335,7 @@ class ProxyBackward(ProxySimple):
         self.conn = asyncio.Queue()
     async def watch_connection(self, reader, writer):
         try:
-            data = await transport.read(reader, 1)
+            data = await transport.read(reader, 1, timeout=None)
             if data:
                 transport.rollback(reader, data)
         except Exception:
@@ -564,8 +564,9 @@ async def test_url(url, rserver):
         print(headers.decode()[:-4])
         print(f'--------------------------------')
         body = bytearray()
+        read = reader.read
         while not reader.at_eof():
-            s = await transport.read(reader, 65536)
+            s = await read(65536)
             if not s:
                 break
             body.extend(s)

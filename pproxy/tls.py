@@ -3,7 +3,6 @@
 import asyncio
 from asyncio import create_task
 
-from . import transport
 
 
 def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, verbose=None):
@@ -62,9 +61,10 @@ def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, ve
     async def channel():
         read_size = 65536
         buffer = ssl.get_buffer(read_size) if hasattr(ssl, 'get_buffer') else None
+        read = reader.read
         try:
             while not reader.at_eof() and not ssl._app_transport._closed:
-                data = await transport.read(reader, read_size)
+                data = await read(read_size)
                 if not data:
                     break
                 if buffer is not None:

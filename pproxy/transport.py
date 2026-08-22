@@ -8,8 +8,11 @@ DEFAULT_TIMEOUT = 60
 async def read(reader, size, timeout=DEFAULT_TIMEOUT):
     """Read up to *size* bytes with the proxy socket timeout."""
     if hasattr(reader, "read_w"):
-        return await reader.read_w(size)
-    operation = reader.read(size)
+        operation = reader.read_w(size)
+    else:
+        operation = reader.read(size)
+    if timeout is None:
+        return await operation
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
