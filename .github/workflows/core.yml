@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - modernize
+      - hardening-followup
   pull_request:
 
 permissions:
@@ -43,11 +44,19 @@ jobs:
       - name: Run unittest contracts
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
+      - name: Run optimized unittest contracts
+        run: python -O -m unittest discover -s tests -p "test_*.py" -v
+
       - name: Run pytest collection
         run: python -m pytest -q
 
-      - name: Lint new tests
-        run: python -m ruff check tests/test_contracts.py tests/test_websocket.py
+      - name: Lint contract and smoke tests
+        run: >-
+          python -m ruff check
+          tests/test_contracts.py
+          tests/test_websocket.py
+          tests/test_malformed_inputs.py
+          tests/test_leaks.py
 
       - name: Build a wheel
         run: python -m build --wheel

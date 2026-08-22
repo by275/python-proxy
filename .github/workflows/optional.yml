@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - modernize
+      - hardening-followup
   pull_request:
 
 permissions:
@@ -18,16 +19,36 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: HTTP/2
+          - name: HTTP/2 Python 3.12
+            python-version: "3.12"
             extra: h2
             module: h2
-          - name: SSH
+          - name: HTTP/2 Python 3.13
+            python-version: "3.13"
+            extra: h2
+            module: h2
+          - name: SSH Python 3.12
+            python-version: "3.12"
             extra: sshtunnel
             module: asyncssh
-          - name: QUIC and HTTP/3
+          - name: SSH Python 3.13
+            python-version: "3.13"
+            extra: sshtunnel
+            module: asyncssh
+          - name: QUIC and HTTP/3 Python 3.12
+            python-version: "3.12"
             extra: quic
             module: aioquic
-          - name: Accelerated crypto and event loop
+          - name: QUIC and HTTP/3 Python 3.13
+            python-version: "3.13"
+            extra: quic
+            module: aioquic
+          - name: Accelerated crypto and event loop Python 3.12
+            python-version: "3.12"
+            extra: accelerated
+            module: Crypto
+          - name: Accelerated crypto and event loop Python 3.13
+            python-version: "3.13"
             extra: accelerated
             module: Crypto
 
@@ -38,7 +59,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install the selected optional extra
