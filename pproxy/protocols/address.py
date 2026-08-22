@@ -3,6 +3,7 @@
 import socket
 
 from .. import transport
+from ..errors import ProtocolError
 
 
 async def socks_address_stream(reader, n):
@@ -18,7 +19,7 @@ async def socks_address_stream(reader, n):
         data = await transport.read_exactly(reader, 16)
         host_name = socket.inet_ntop(socket.AF_INET6, data)
     else:
-        raise Exception(f'Unknown address header {n}')
+        raise ProtocolError(f'Unknown address header {n}')
     data_port = await transport.read_exactly(reader, 2)
     return host_name, int.from_bytes(data_port, 'big'), data + data_port
 

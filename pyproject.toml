@@ -60,6 +60,7 @@ daemon = [
 ]
 dev = [
     "build>=1.2",
+    "pyperf>=2.7",
     "pytest>=8.0",
     "ruff>=0.6",
 ]

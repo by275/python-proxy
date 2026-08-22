@@ -1,5 +1,6 @@
 import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections, contextlib
 from asyncio import create_task
+from typing import Any, Callable
 from . import proto
 from . import admin
 from . import relay
@@ -459,13 +460,15 @@ class ProxyBackward(ProxySimple):
         return self.backward.start_server(args, handler)
 
 
-def compile_rule(filename):
+def compile_rule(filename: str) -> Callable[[str], Any]:
+    """Compile an inline rule or a newline-delimited rule file."""
     if filename.startswith("{") and filename.endswith("}"):
         return re.compile(filename[1:-1]).match
     with open(filename) as f:
         return re.compile('(:?'+''.join('|'.join(i.strip() for i in f if i.strip() and not i.startswith('#')))+')$').match
 
-def split_uri_jumps(uri_jumps):
+def split_uri_jumps(uri_jumps: str) -> list[str]:
+    """Split chained proxy URIs while preserving URI contents."""
     parts = []
     start = 0
     for match in re.finditer(r'__(?=[A-Za-z][A-Za-z0-9+.-]*://)', uri_jumps):
@@ -474,7 +477,8 @@ def split_uri_jumps(uri_jumps):
     parts.append(uri_jumps[start:])
     return parts
 
-def proxies_by_uri(uri_jumps):
+def proxies_by_uri(uri_jumps: str) -> Any:
+    """Build a proxy object from a possibly chained proxy URI."""
     jump = DIRECT
     for uri in reversed(split_uri_jumps(uri_jumps)):
         jump = proxy_by_uri(uri, jump)
@@ -482,7 +486,8 @@ def proxies_by_uri(uri_jumps):
 
 sslcontexts = []
 
-def proxy_by_uri(uri, jump):
+def proxy_by_uri(uri: str, jump: Any) -> Any:
+    """Build one proxy layer and attach *jump* as its downstream target."""
     scheme, _, uri = uri.partition('://')
     url = urllib.parse.urlparse('s://'+uri)
     rawprotos = [i.lower() for i in scheme.split('+')]

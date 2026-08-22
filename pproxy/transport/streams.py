@@ -1,11 +1,12 @@
 """Compatibility helpers for asyncio stream operations."""
 
 import asyncio
+from typing import Any
 
 DEFAULT_TIMEOUT = 60
 
 
-async def read(reader, size, timeout=DEFAULT_TIMEOUT):
+async def read(reader: Any, size: int, timeout: float | None = DEFAULT_TIMEOUT) -> bytes:
     """Read up to *size* bytes with the proxy socket timeout."""
     if hasattr(reader, "read_w"):
         operation = reader.read_w(size)
@@ -16,7 +17,7 @@ async def read(reader, size, timeout=DEFAULT_TIMEOUT):
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
-async def read_exactly(reader, size, timeout=DEFAULT_TIMEOUT):
+async def read_exactly(reader: Any, size: int, timeout: float | None = DEFAULT_TIMEOUT) -> bytes:
     """Read exactly *size* bytes with the proxy socket timeout."""
     if hasattr(reader, "read_n"):
         return await reader.read_n(size)
@@ -24,7 +25,11 @@ async def read_exactly(reader, size, timeout=DEFAULT_TIMEOUT):
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
-async def read_until(reader, separator, timeout=DEFAULT_TIMEOUT):
+async def read_until(
+    reader: Any,
+    separator: bytes,
+    timeout: float | None = DEFAULT_TIMEOUT,
+) -> bytes:
     """Read through *separator* with the proxy socket timeout."""
     if hasattr(reader, "read_until"):
         return await reader.read_until(separator)
@@ -32,7 +37,7 @@ async def read_until(reader, separator, timeout=DEFAULT_TIMEOUT):
     return await asyncio.wait_for(operation, timeout=timeout)
 
 
-def rollback(reader, data):
+def rollback(reader: Any, data: bytes) -> None:
     """Put already-read bytes back in front of a stream."""
     method = getattr(reader, "rollback", None)
     if method is not None:
@@ -45,7 +50,7 @@ def rollback(reader, data):
     buffer[:0] = data
 
 
-def prepend(reader, data):
+def prepend(reader: Any, data: bytes) -> None:
     """Prepend bytes to a stream's pending input."""
     if not data:
         return
@@ -56,7 +61,7 @@ def prepend(reader, data):
     rollback(reader, data)
 
 
-def take_buffer(reader):
+def take_buffer(reader: Any) -> bytes:
     """Take bytes already buffered by a stream without exposing its storage."""
     method = getattr(reader, "take_buffer", None)
     if method is not None:

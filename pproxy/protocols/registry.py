@@ -1,5 +1,9 @@
 """Protocol dispatch and URI-scheme registry."""
 
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
+
 from .base import Direct
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
@@ -33,7 +37,50 @@ MAPPINGS = dict(
 MAPPINGS['in'] = ''
 
 
-def register_protocol(name, protocol):
+@dataclass(frozen=True, slots=True)
+class ProtocolMetadata:
+    """Capability and dependency metadata for one registered scheme."""
+
+    supports_tcp: bool
+    supports_udp: bool
+    supports_client: bool
+    supports_server: bool
+    optional_dependency: str | None = None
+    default_port: int | None = 8080
+    transport_modifier: bool = False
+
+
+PROTOCOL_METADATA: dict[str, ProtocolMetadata] = {
+    'direct': ProtocolMetadata(True, True, True, False, default_port=None),
+    'http': ProtocolMetadata(True, False, True, True),
+    'httponly': ProtocolMetadata(True, False, True, True),
+    'httpadmin': ProtocolMetadata(True, False, True, True),
+    'ssh': ProtocolMetadata(True, False, True, False, 'asyncssh', 22),
+    'socks5': ProtocolMetadata(True, True, True, True),
+    'socks4': ProtocolMetadata(True, False, True, True),
+    'socks': ProtocolMetadata(True, True, True, True),
+    'ss': ProtocolMetadata(True, True, True, True),
+    'ssr': ProtocolMetadata(True, True, True, True),
+    'redir': ProtocolMetadata(True, True, False, True),
+    'pf': ProtocolMetadata(True, True, False, True),
+    'tunnel': ProtocolMetadata(True, True, True, True),
+    'echo': ProtocolMetadata(True, True, False, True),
+    'ws': ProtocolMetadata(True, False, True, True),
+    'trojan': ProtocolMetadata(True, False, True, True),
+    'h2': ProtocolMetadata(True, False, True, True, 'h2'),
+    'h3': ProtocolMetadata(False, True, True, True, 'aioquic'),
+    'quic': ProtocolMetadata(False, True, True, True, 'aioquic'),
+    'ssl': ProtocolMetadata(False, False, False, False, transport_modifier=True),
+    'secure': ProtocolMetadata(False, False, False, False, transport_modifier=True),
+    'in': ProtocolMetadata(False, False, False, False, transport_modifier=True),
+}
+
+
+def register_protocol(
+    name: str,
+    protocol: Any,
+    metadata: ProtocolMetadata | None = None,
+) -> None:
     """Register an additional scheme without changing the legacy facade.
 
     Optional protocol adapters can use this hook to add a scheme such as
@@ -43,9 +90,17 @@ def register_protocol(name, protocol):
     if not name or not isinstance(name, str):
         raise ValueError('protocol name must be a non-empty string')
     MAPPINGS[name] = protocol
+    if metadata is not None:
+        PROTOCOL_METADATA[name] = metadata
 
 
-async def accept(protos, reader, **kw):
+def get_protocol_metadata(name: str) -> ProtocolMetadata | None:
+    """Return capability metadata for *name*, if the scheme is registered."""
+    return PROTOCOL_METADATA.get(name)
+
+
+async def accept(protos: Iterable[Any], reader: Any, **kw: Any) -> tuple[Any, ...]:
+    """Guess and accept the first configured protocol for a stream."""
     for protocol in protos:
         try:
             user = await protocol.guess(reader, **kw)
@@ -59,7 +114,8 @@ async def accept(protos, reader, **kw):
     raise Exception('Unsupported protocol')
 
 
-def udp_accept(protos, data, **kw):
+def udp_accept(protos: Iterable[Any], data: bytes, **kw: Any) -> tuple[Any, ...]:
+    """Accept a datagram with the first configured protocol that matches it."""
     for protocol in protos:
         ret = protocol.udp_accept(data, **kw)
         if ret:
@@ -67,7 +123,8 @@ def udp_accept(protos, data, **kw):
     raise Exception(f'Unsupported protocol {data[:10]}')
 
 
-def get_protos(rawprotos):
+def get_protos(rawprotos: Iterable[str]) -> tuple[str | None, list[Any] | None]:
+    """Resolve URI protocol names into configured protocol instances."""
     protos = []
     for value in rawprotos:
         name, _, param = value.partition('{')

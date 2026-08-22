@@ -123,9 +123,45 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_registry_is_reexported_by_legacy_module(self):
         self.assertIs(proto.MAPPINGS, registry_protocol.MAPPINGS)
+        self.assertIs(proto.PROTOCOL_METADATA, registry_protocol.PROTOCOL_METADATA)
+        self.assertIs(proto.ProtocolMetadata, registry_protocol.ProtocolMetadata)
         self.assertIs(proto.get_protos, registry_protocol.get_protos)
+        self.assertIs(proto.get_protocol_metadata, registry_protocol.get_protocol_metadata)
         self.assertIs(proto.accept, registry_protocol.accept)
         self.assertIs(proto.udp_accept, registry_protocol.udp_accept)
+
+    def test_registry_metadata_describes_transport_capabilities(self):
+        http_metadata = proto.get_protocol_metadata("http")
+        socks_metadata = proto.get_protocol_metadata("socks5")
+        h2_metadata = proto.get_protocol_metadata("h2")
+
+        self.assertTrue(http_metadata.supports_tcp)
+        self.assertFalse(http_metadata.supports_udp)
+        self.assertTrue(socks_metadata.supports_udp)
+        self.assertEqual(h2_metadata.optional_dependency, "h2")
+        self.assertEqual(h2_metadata.default_port, 8080)
+        self.assertTrue(proto.get_protocol_metadata("ssl").transport_modifier)
+        self.assertIsNone(proto.get_protocol_metadata("unknown"))
+
+    def test_register_protocol_can_publish_optional_metadata(self):
+        class FutureProtocol:
+            def __init__(self, param):
+                self.param = param
+
+        metadata = registry_protocol.ProtocolMetadata(
+            supports_tcp=True,
+            supports_udp=False,
+            supports_client=True,
+            supports_server=True,
+            optional_dependency="future-package",
+            default_port=9000,
+        )
+        try:
+            proto.register_protocol("future-metadata", FutureProtocol, metadata)
+            self.assertIs(proto.get_protocol_metadata("future-metadata"), metadata)
+        finally:
+            registry_protocol.MAPPINGS.pop("future-metadata", None)
+            registry_protocol.PROTOCOL_METADATA.pop("future-metadata", None)
 
     def test_registry_accepts_future_optional_protocols(self):
         class FutureProtocol:

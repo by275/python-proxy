@@ -46,7 +46,10 @@ WS = websocket_protocol.WS
 accept = registry_protocol.accept
 udp_accept = registry_protocol.udp_accept
 MAPPINGS = registry_protocol.MAPPINGS
+PROTOCOL_METADATA = registry_protocol.PROTOCOL_METADATA
+ProtocolMetadata = registry_protocol.ProtocolMetadata
 get_protos = registry_protocol.get_protos
+get_protocol_metadata = registry_protocol.get_protocol_metadata
 register_protocol = registry_protocol.register_protocol
 
 sslwrap = tls.wrap

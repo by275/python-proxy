@@ -6,7 +6,8 @@ import urllib.parse
 
 from .. import admin, transport
 from ..config import netloc_split
-from .base import BaseProtocol, DRAIN_BUFFER_SIZE
+from ..errors import ProtocolError
+from .base import DRAIN_BUFFER_SIZE, BaseProtocol
 
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
@@ -20,7 +21,7 @@ def parse_http_request_head(data):
     request_line, *header_lines = data.split(b'\r\n')
     match = HTTP_METHOD_LINE.match(request_line)
     if match is None:
-        raise Exception('Unknown HTTP header')
+        raise ProtocolError('Unknown HTTP header')
     method_b, path_b, ver_b = match.groups()
     filtered_headers = []
     host = ''
