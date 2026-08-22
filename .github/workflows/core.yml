@@ -35,6 +35,11 @@ jobs:
       - name: Compile source and tests
         run: python -m compileall -q pproxy tests
 
+      - name: Smoke-test the installed CLI
+        run: |
+          python -m pproxy --version
+          python -m pproxy -h
+
       - name: Run unittest contracts
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
