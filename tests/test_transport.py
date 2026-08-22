@@ -41,3 +41,12 @@ class TransportHelperTests(unittest.IsolatedAsyncioTestCase):
         transport.rollback(reader, data)
 
         self.assertEqual(await reader.read(4), b"GET ")
+
+    async def test_prepend_and_take_buffer_use_public_helpers(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"body")
+
+        self.assertEqual(transport.take_buffer(reader), b"body")
+        transport.prepend(reader, b"head")
+
+        self.assertEqual(await reader.read(4), b"head")

@@ -1,4 +1,5 @@
 import os, hashlib, hmac
+from . import transport
 
 class BaseCipher(object):
     PYTHON = False
@@ -259,9 +260,9 @@ def get_cipher(cipher_key):
                         return
                 o(s)
             reader.feed_data = feed_data
-            if reader._buffer:
-                reader._buffer, buf = bytearray(), reader._buffer
-                feed_data(buf)
+            buffered = transport.take_buffer(reader)
+            if buffered:
+                feed_data(buffered)
         def write(s, o=writer.write):
             if not writer_cipher.iv:
                 writer_cipher.setup_iv()
@@ -278,4 +279,3 @@ def get_cipher(cipher_key):
     apply_cipher.plugins = []
     apply_cipher.datagram = PacketCipher(cipher, key, cipher_name)
     return None, apply_cipher
-

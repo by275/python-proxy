@@ -26,7 +26,7 @@ class Http_Simple_Plugin(BasePlugin):
         buf = await transport.read_until(reader, b'\r\n\r\n')
         data = buf.split(b' ')[:2]
         data = bytes.fromhex(data[1][1:].replace(b'%',b'').decode())
-        reader._buffer[0:0] = data
+        transport.prepend(reader, data)
         writer.write(b'HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Encoding: gzip\r\nContent-Type: text/html\r\nDate: ' + datetime.datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT').encode() + b'\r\nServer: nginx\r\nVary: Accept-Encoding\r\n\r\n')
     async def init_server_data(self, reader, writer, cipher, raddr):
         writer.write(f'GET / HTTP/1.1\r\nHost: {raddr}\r\nUser-Agent: curl\r\nAccept-Encoding: gzip, deflate\r\nConnection: keep-alive\r\n\r\n'.encode())

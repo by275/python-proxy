@@ -206,8 +206,9 @@ class SS(SSR):
                     ret.extend(data)
             return bytes(ret)
         reader.decrypts.append(decrypt)
-        if reader._buffer:
-            reader._buffer = bytearray(decrypt(reader._buffer))
+        buffered = transport.take_buffer(reader)
+        if buffered:
+            transport.prepend(reader, decrypt(buffered))
     def patch_ota_writer(self, cipher, writer):
         chunk_id = 0
         def write(data, o=writer.write):
@@ -618,9 +619,9 @@ class WS(BaseProtocol):
                     else:
                         o(data)
         reader.feed_data = feed_data
-        if reader._buffer:
-            reader._buffer, buf = bytearray(), reader._buffer
-            feed_data(buf)
+        buffered = transport.take_buffer(reader)
+        if buffered:
+            feed_data(buffered)
         def write(data, o=writer.write):
             if not data: return
             return write_frame(0x2, data)

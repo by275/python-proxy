@@ -43,3 +43,27 @@ def rollback(reader, data):
     if buffer is None:
         raise TypeError(f"{type(reader).__name__} does not support rollback")
     buffer[:0] = data
+
+
+def prepend(reader, data):
+    """Prepend bytes to a stream's pending input."""
+    if not data:
+        return
+    method = getattr(reader, "prepend_data", None)
+    if method is not None:
+        method(data)
+        return
+    rollback(reader, data)
+
+
+def take_buffer(reader):
+    """Take bytes already buffered by a stream without exposing its storage."""
+    method = getattr(reader, "take_buffer", None)
+    if method is not None:
+        return method()
+
+    buffer = getattr(reader, "_buffer", None)
+    if not buffer:
+        return b""
+    reader._buffer = bytearray()
+    return bytes(buffer)
