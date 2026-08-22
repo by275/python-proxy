@@ -1,5 +1,8 @@
 """Protocol dispatch and URI-scheme registry."""
 
+from collections.abc import Iterable
+from typing import Any
+
 from .base import Direct
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
@@ -33,7 +36,7 @@ MAPPINGS = dict(
 MAPPINGS['in'] = ''
 
 
-def register_protocol(name, protocol):
+def register_protocol(name: str, protocol: Any) -> None:
     """Register an additional scheme without changing the legacy facade.
 
     Optional protocol adapters can use this hook to add a scheme such as
@@ -45,7 +48,8 @@ def register_protocol(name, protocol):
     MAPPINGS[name] = protocol
 
 
-async def accept(protos, reader, **kw):
+async def accept(protos: Iterable[Any], reader: Any, **kw: Any) -> tuple[Any, ...]:
+    """Guess and accept the first configured protocol for a stream."""
     for protocol in protos:
         try:
             user = await protocol.guess(reader, **kw)
@@ -59,7 +63,8 @@ async def accept(protos, reader, **kw):
     raise Exception('Unsupported protocol')
 
 
-def udp_accept(protos, data, **kw):
+def udp_accept(protos: Iterable[Any], data: bytes, **kw: Any) -> tuple[Any, ...]:
+    """Accept a datagram with the first configured protocol that matches it."""
     for protocol in protos:
         ret = protocol.udp_accept(data, **kw)
         if ret:
@@ -67,7 +72,8 @@ def udp_accept(protos, data, **kw):
     raise Exception(f'Unsupported protocol {data[:10]}')
 
 
-def get_protos(rawprotos):
+def get_protos(rawprotos: Iterable[str]) -> tuple[str | None, list[Any] | None]:
+    """Resolve URI protocol names into configured protocol instances."""
     protos = []
     for value in rawprotos:
         name, _, param = value.partition('{')
