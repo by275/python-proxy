@@ -7,12 +7,13 @@ __email__       = "qianwenjie@gmail.com"
 __url__         = "https://github.com/qwj/python-proxy"
 
 try:
-    from setuptools_scm import get_version
-    __version__ = get_version()
-except Exception:
+    from importlib.metadata import PackageNotFoundError, version
+    __version__ = version(__title__)
+except PackageNotFoundError:
     try:
-        from pkg_resources import get_distribution
-        __version__ = get_distribution('pproxy').version
+        from pathlib import Path
+        from setuptools_scm import get_version
+        __version__ = get_version(root=Path(__file__).resolve().parents[1])
     except Exception:
         __version__ = 'unknown'
 
