@@ -3,8 +3,7 @@ import io
 import socket
 import unittest
 
-from pproxy import proto
-from pproxy import server
+from pproxy import proto, server
 
 
 class ParserContractTests(unittest.TestCase):
