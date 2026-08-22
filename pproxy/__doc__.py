@@ -25,7 +25,12 @@ def _git_version(root):
         description = description[:-6]
     parts = description.rsplit('-', 2)
     if len(parts) == 3 and parts[1].isdigit() and parts[2].startswith('g'):
-        version_text = f'{parts[0]}.dev{parts[1]}+{parts[2]}'
+        try:
+            major, minor, patch = (int(item) for item in parts[0].split('.'))
+            next_version = f'{major}.{minor}.{patch + 1}'
+        except ValueError:
+            next_version = parts[0]
+        version_text = f'{next_version}.dev{parts[1]}+{parts[2]}'
     else:
         version_text = description
     return version_text + ('.dirty' if dirty else '')
