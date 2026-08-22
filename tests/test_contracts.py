@@ -3,7 +3,10 @@ import io
 import socket
 import unittest
 
+import pproxy
 from pproxy import proto, server
+from pproxy.config import ProxyConfig
+from pproxy.errors import ProtocolError
 
 
 class ParserContractTests(unittest.TestCase):
@@ -73,6 +76,10 @@ class ParserContractTests(unittest.TestCase):
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_additive_public_contracts_are_exported(self):
+        self.assertIs(pproxy.ProxyConfig, ProxyConfig)
+        self.assertIs(pproxy.ProtocolError, ProtocolError)
+
     def test_auth_table_state_is_instance_local(self):
         first = server.AuthTable("192.0.2.10", 60)
         second = server.AuthTable("192.0.2.10", 60)
