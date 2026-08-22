@@ -1,0 +1,82 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "setuptools-scm>=8",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pproxy"
+dynamic = ["version"]
+description = "Proxy server that can tunnel among remote servers by regex rules."
+readme = "README.rst"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Qian Wenjie", email = "qianwenjie@gmail.com"},
+]
+keywords = [
+    "proxy",
+    "socks",
+    "http",
+    "shadowsocks",
+    "shadowsocksr",
+    "ssr",
+    "redirect",
+    "pf",
+    "tunnel",
+    "cipher",
+    "ssl",
+    "udp",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+accelerated = [
+    "pycryptodome>=3.7.2",
+    "uvloop>=0.13.0; sys_platform != 'win32'",
+]
+h2 = [
+    "h2>=4.0",
+]
+sshtunnel = [
+    "asyncssh>=2.5.0",
+]
+quic = [
+    "aioquic>=0.9.7",
+]
+daemon = [
+    "python-daemon>=2.2.3; sys_platform != 'win32'",
+]
+dev = [
+    "build>=1.2",
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+pproxy = "pproxy.server:main"
+
+[tool.setuptools]
+packages = ["pproxy"]
+include-package-data = true
+
+[tool.setuptools_scm]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
