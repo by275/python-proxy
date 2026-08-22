@@ -3,6 +3,7 @@ from asyncio import create_task
 from . import proto
 from . import admin
 from . import relay
+from .runtime import TaskRegistry
 from . import transport
 from .config import ProxyConfig
 from .errors import require
@@ -42,6 +43,10 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
 
 relay_with_taskgroup = relay.relay_with_taskgroup
 
+
+def _create_task(awaitable, registry=None):
+    return registry.create_task(awaitable) if registry is not None else create_task(awaitable)
+
 def schedule(rserver, salgorithm, host_name, port):
     filter_cond = lambda o: o.alive and o.match_rule(host_name, port)
     if salgorithm == 'fa':
@@ -59,7 +64,7 @@ def schedule(rserver, salgorithm, host_name, port):
     else:
         raise Exception('Unknown scheduling algorithm') #Unreachable
 
-async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, sslserver, debug=0, authtime=86400*30, block=None, salgorithm='fa', verbose=DUMMY, modstat=lambda u,r,h:lambda i:DUMMY, **kwargs):
+async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, sslserver, debug=0, authtime=86400*30, block=None, salgorithm='fa', verbose=DUMMY, modstat=lambda u,r,h:lambda i:DUMMY, task_registry=None, **kwargs):
     try:
         reader, writer = proto.sslwrap(reader, writer, sslserver, True, None, verbose)
         if unix:
@@ -73,9 +78,9 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
         reader_cipher, _ = await prepare_ciphers(cipher, reader, writer, server_side=False)
         lproto, user, host_name, port, client_connected = await proto.accept(protos, reader=reader, writer=writer, authtable=AuthTable(remote_ip, authtime), reader_cipher=reader_cipher, sock=writer.get_extra_info('socket'), **kwargs)
         if host_name == 'echo':
-            create_task(lproto.channel(reader, writer, DUMMY, DUMMY))
+            _create_task(lproto.channel(reader, writer, DUMMY, DUMMY), task_registry)
         elif host_name == 'empty':
-            create_task(lproto.channel(reader, writer, None, DUMMY))
+            _create_task(lproto.channel(reader, writer, None, DUMMY), task_registry)
         elif block and block(host_name):
             raise Exception('BLOCK ' + host_name)
         else:
@@ -163,6 +168,7 @@ class ProxyDirect(object):
         self.connections = 0
         self.udpmap = {}
         self.udp_lru = collections.OrderedDict()
+        self.task_registry = TaskRegistry()
     @property
     def direct(self):
         return type(self) is ProxyDirect
@@ -227,6 +233,25 @@ class ProxyDirect(object):
             remote = self.destination(host, port)
             loop = asyncio.get_running_loop()
             await loop.create_datagram_endpoint(prot, remote_addr=remote)
+
+    def close(self):
+        self.task_registry.cancel_all()
+        for prot in tuple(self.udpmap.values()):
+            if getattr(prot, 'transport', None):
+                prot.transport.close()
+
+    async def wait_closed(self):
+        await self.task_registry.wait_closed()
+
+    async def aclose(self):
+        self.close()
+        await self.wait_closed()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.aclose()
     def udp_prepare_connection(self, host, port, data):
         return data
     def wait_open_connection(self, host, port, local_addr, family):
@@ -300,7 +325,9 @@ class ProxySimple(ProxyDirect):
             def connection_made(prot, transport):
                 prot.transport = transport
             def datagram_received(prot, data, addr):
-                create_task(datagram_handler(prot.transport, data, addr, **vars(self), **args))
+                self.task_registry.create_task(
+                    datagram_handler(prot.transport, data, addr, **vars(self), **args)
+                )
         loop = asyncio.get_running_loop()
         return loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
     def wait_open_connection(self, host, port, local_addr, family):
@@ -331,7 +358,8 @@ class ProxyBackward(ProxySimple):
         self.backward_num = backward_num
         self.closed = False
         self.writers = set()
-        self.tasks = set()
+        self.tasks = self.task_registry
+        self.server.task_registry = self.task_registry
         self.conn = asyncio.Queue()
     async def watch_connection(self, reader, writer):
         try:
@@ -354,19 +382,33 @@ class ProxyBackward(ProxySimple):
             writer.close()
     def close(self):
         self.closed = True
-        for task in tuple(self.tasks):
-            task.cancel()
+        if hasattr(self.tasks, 'cancel_all'):
+            self.tasks.cancel_all()
+        else:
+            for task in tuple(self.tasks):
+                task.cancel()
         for writer in self.writers:
             try:
                 writer.close()
             except Exception:
                 pass
+
+    async def wait_closed(self):
+        if hasattr(self.tasks, 'wait_closed'):
+            await self.tasks.wait_closed()
+        else:
+            tasks = tuple(self.tasks)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self.tasks.clear()
+
+    async def aclose(self):
+        self.close()
+        await self.wait_closed()
     async def start_server(self, args, stream_handler=stream_handler):
         handler = functools.partial(stream_handler, **vars(self.server), **args)
         for _ in range(self.backward_num):
-            task = create_task(self.start_server_run(handler))
-            self.tasks.add(task)
-            task.add_done_callback(self.tasks.discard)
+            self.tasks.create_task(self.start_server_run(handler))
         return self
     async def start_server_run(self, handler):
         errwait = 0
@@ -387,7 +429,7 @@ class ProxyBackward(ProxySimple):
                     data = None
                 if data and data[0] != 0:
                     transport.rollback(reader, data)
-                    create_task(handler(reader, writer))
+                    self.tasks.create_task(handler(reader, writer))
                 else:
                     writer.close()
                 errwait = 0
@@ -411,7 +453,9 @@ class ProxyBackward(ProxySimple):
                     require(auth == (await transport.read_exactly(reader, len(auth))))
                 except Exception:
                     return
-            await self.conn.put((reader, writer, create_task(self.watch_connection(reader, writer))))
+            await self.conn.put(
+                (reader, writer, self.tasks.create_task(self.watch_connection(reader, writer)))
+            )
         return self.backward.start_server(args, handler)
 
 
