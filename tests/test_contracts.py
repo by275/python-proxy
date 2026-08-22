@@ -10,6 +10,7 @@ from pproxy.errors import ProtocolError
 from pproxy.protocols import address as address_protocol
 from pproxy.protocols import base as base_protocol
 from pproxy.protocols import http as http_protocol
+from pproxy.protocols import socks as socks_protocol
 
 
 class ParserContractTests(unittest.TestCase):
@@ -100,6 +101,13 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIs(proto.H2, http_protocol.H2)
         self.assertIs(proto.H3, http_protocol.H3)
         self.assertIs(proto.HTTPAdmin, http_protocol.HTTPAdmin)
+
+    def test_socks_protocol_classes_are_reexported_by_legacy_module(self):
+        self.assertIs(proto.Trojan, socks_protocol.Trojan)
+        self.assertIs(proto.SSR, socks_protocol.SSR)
+        self.assertIs(proto.SS, socks_protocol.SS)
+        self.assertIs(proto.Socks4, socks_protocol.Socks4)
+        self.assertIs(proto.Socks5, socks_protocol.Socks5)
 
     def test_auth_table_state_is_instance_local(self):
         first = server.AuthTable("192.0.2.10", 60)
