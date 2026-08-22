@@ -7,6 +7,7 @@ import pproxy
 from pproxy import proto, server
 from pproxy.config import ProxyConfig
 from pproxy.errors import ProtocolError
+from pproxy.protocols import http as http_protocol
 
 
 class ParserContractTests(unittest.TestCase):
@@ -45,6 +46,10 @@ class ParserContractTests(unittest.TestCase):
         self.assertEqual(headers, {"Host": "example.test", "X-Test": "value"})
         self.assertEqual(rendered, "Host: example.test\r\nX-Test: value")
         self.assertEqual(proto.xor_mask_bytes(b"hello", b"abcd"), b"\t\x07\x0f\x08\x0e")
+
+    def test_http_parser_is_reexported_by_legacy_proto_module(self):
+        self.assertIs(proto.parse_http_request_head, http_protocol.parse_http_request_head)
+        self.assertIs(proto.decode_http_header_block, http_protocol.decode_http_header_block)
 
     def test_socks_address_round_trip(self):
         raw = io.BytesIO(socket.inet_aton("192.0.2.1") + (443).to_bytes(2, "big"))
