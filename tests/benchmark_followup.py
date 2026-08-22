@@ -138,6 +138,32 @@ def time_task_group(loops):
     return time.perf_counter() - started
 
 
+def time_task_group_cancellation(loops):
+    loop = asyncio.new_event_loop()
+    started = time.perf_counter()
+
+    async def fail_group():
+        async def fail():
+            raise RuntimeError("benchmark cancellation")
+
+        try:
+            async with asyncio.TaskGroup() as task_group:
+                task_group.create_task(asyncio.Event().wait())
+                task_group.create_task(fail())
+        except* RuntimeError:
+            pass
+
+    async def run():
+        for _ in range(loops):
+            await fail_group()
+
+    try:
+        loop.run_until_complete(run())
+    finally:
+        loop.close()
+    return time.perf_counter() - started
+
+
 def time_statistics_callbacks(loops):
     def modstat(user, remote_ip, host):
         def update(amount):
@@ -252,6 +278,7 @@ def main():
     runner.bench_time_func("task_creation", time_task_creation)
     runner.bench_time_func("task_registry_creation", time_registry_task_creation)
     runner.bench_time_func("task_group_creation", time_task_group)
+    runner.bench_time_func("task_group_cancellation", time_task_group_cancellation)
     runner.bench_time_func("statistics_callbacks", time_statistics_callbacks)
     runner.bench_time_func("http_header_parsing", time_http_header_parsing)
     runner.bench_time_func("websocket_frame_parsing", time_websocket_frame_parsing)
