@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from pproxy import transport
+from pproxy.transport import streams
 
 
 class FakeReader:
@@ -39,6 +40,11 @@ class LegacyTimedReader:
 
 
 class TransportHelperTests(unittest.IsolatedAsyncioTestCase):
+    def test_package_facade_reexports_stream_helpers(self):
+        self.assertIs(transport.read, streams.read)
+        self.assertIs(transport.read_exactly, streams.read_exactly)
+        self.assertIs(transport.read_until, streams.read_until)
+
     async def test_delegates_to_standard_stream_methods(self):
         reader = FakeReader()
 

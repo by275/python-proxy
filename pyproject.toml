@@ -68,8 +68,10 @@ dev = [
 pproxy = "pproxy.server:main"
 
 [tool.setuptools]
-packages = ["pproxy"]
 include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["pproxy*"]
 
 [tool.setuptools_scm]
 
