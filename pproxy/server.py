@@ -2,6 +2,7 @@ import argparse, time, re, asyncio, functools, base64, random, urllib.parse, soc
 from asyncio import create_task
 from . import proto
 from . import admin
+from . import relay
 from . import transport
 from .config import ProxyConfig
 from .errors import require
@@ -39,10 +40,7 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
         return None, None
 
 
-async def relay_with_taskgroup(inbound, outbound):
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(inbound)
-        tg.create_task(outbound)
+relay_with_taskgroup = relay.relay_with_taskgroup
 
 def schedule(rserver, salgorithm, host_name, port):
     filter_cond = lambda o: o.alive and o.match_rule(host_name, port)
