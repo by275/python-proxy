@@ -182,12 +182,15 @@ class ProxyDirect(object):
         self.udp_lru.move_to_end(addr)
     def udp_discard(self, addr):
         self.udp_lru.pop(addr, None)
-        return self.udpmap.pop(addr, None)
+        prot = self.udpmap.pop(addr, None)
+        if prot is not None:
+            self.connection_change(-1)
+        return prot
     def udp_evict_if_needed(self):
         if len(self.udp_lru) < UDP_LIMIT:
             return
-        addr, prot = self.udp_lru.popitem(last=False)
-        self.udpmap.pop(addr, None)
+        addr = next(iter(self.udp_lru))
+        prot = self.udp_discard(addr)
         if prot.transport:
             prot.transport.close()
     async def udp_open_connection(self, host, port, data, addr, reply):
