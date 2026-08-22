@@ -10,7 +10,10 @@ from pproxy.errors import ProtocolError
 from pproxy.protocols import address as address_protocol
 from pproxy.protocols import base as base_protocol
 from pproxy.protocols import http as http_protocol
+from pproxy.protocols import registry as registry_protocol
 from pproxy.protocols import socks as socks_protocol
+from pproxy.protocols import transparent as transparent_protocol
+from pproxy.protocols import websocket as websocket_protocol
 
 
 class ParserContractTests(unittest.TestCase):
@@ -108,6 +111,35 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIs(proto.SS, socks_protocol.SS)
         self.assertIs(proto.Socks4, socks_protocol.Socks4)
         self.assertIs(proto.Socks5, socks_protocol.Socks5)
+
+    def test_socket_protocol_classes_are_reexported_by_legacy_module(self):
+        self.assertIs(proto.SSH, transparent_protocol.SSH)
+        self.assertIs(proto.Transparent, transparent_protocol.Transparent)
+        self.assertIs(proto.Redir, transparent_protocol.Redir)
+        self.assertIs(proto.Pf, transparent_protocol.Pf)
+        self.assertIs(proto.Tunnel, transparent_protocol.Tunnel)
+        self.assertIs(proto.Echo, transparent_protocol.Echo)
+        self.assertIs(proto.WS, websocket_protocol.WS)
+
+    def test_registry_is_reexported_by_legacy_module(self):
+        self.assertIs(proto.MAPPINGS, registry_protocol.MAPPINGS)
+        self.assertIs(proto.get_protos, registry_protocol.get_protos)
+        self.assertIs(proto.accept, registry_protocol.accept)
+        self.assertIs(proto.udp_accept, registry_protocol.udp_accept)
+
+    def test_registry_accepts_future_optional_protocols(self):
+        class FutureProtocol:
+            def __init__(self, param):
+                self.param = param
+
+        try:
+            proto.register_protocol('cfp-test', FutureProtocol)
+            error, protocols = proto.get_protos(['cfp-test{future}'])
+            self.assertIsNone(error)
+            self.assertIsInstance(protocols[0], FutureProtocol)
+            self.assertEqual(protocols[0].param, 'future')
+        finally:
+            registry_protocol.MAPPINGS.pop('cfp-test', None)
 
     def test_auth_table_state_is_instance_local(self):
         first = server.AuthTable("192.0.2.10", 60)
