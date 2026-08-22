@@ -694,6 +694,7 @@ class ProxyBackward(ProxySimple):
         self.backward_num = backward_num
         self.closed = False
         self.writers = set()
+        self.tasks = set()
         self.conn = asyncio.Queue()
     async def watch_connection(self, reader, writer):
         try:
@@ -716,6 +717,8 @@ class ProxyBackward(ProxySimple):
             writer.close()
     def close(self):
         self.closed = True
+        for task in tuple(self.tasks):
+            task.cancel()
         for writer in self.writers:
             try:
                 writer.close()
@@ -724,7 +727,9 @@ class ProxyBackward(ProxySimple):
     async def start_server(self, args, stream_handler=stream_handler):
         handler = functools.partial(stream_handler, **vars(self.server), **args)
         for _ in range(self.backward_num):
-            create_task(self.start_server_run(handler))
+            task = create_task(self.start_server_run(handler))
+            self.tasks.add(task)
+            task.add_done_callback(self.tasks.discard)
         return self
     async def start_server_run(self, handler):
         errwait = 0
