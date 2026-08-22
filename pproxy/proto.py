@@ -572,7 +572,7 @@ class WS(BaseProtocol):
     async def guess(self, reader, **kw):
         header = await reader.read_w(4)
         reader.rollback(header)
-        return reader == b'GET '
+        return header == b'GET '
     def patch_ws_stream(self, reader, writer, masked=False):
         data_len, mask_key, opcode, _buffer = None, None, None, bytearray()
         raw_write = writer.write
