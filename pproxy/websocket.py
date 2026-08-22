@@ -4,9 +4,10 @@ import os
 
 from . import transport
 from .errors import ProtocolError
+from .runtime import WEBSOCKET_FRAME_LIMIT, WEBSOCKET_MESSAGE_LIMIT
 
-MAX_FRAME_SIZE = 16 * 1024 * 1024
-MAX_MESSAGE_SIZE = 16 * 1024 * 1024
+MAX_FRAME_SIZE = WEBSOCKET_FRAME_LIMIT
+MAX_MESSAGE_SIZE = WEBSOCKET_MESSAGE_LIMIT
 
 
 def xor_mask_bytes(data, mask_key):

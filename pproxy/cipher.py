@@ -2,8 +2,11 @@ import copy
 import os
 import hashlib
 import hmac
+import warnings
 from . import transport
 from .errors import ProtocolError, require
+
+LEGACY_CIPHERS = frozenset({'rc4', 'rc4-md5', 'bf-cfb', 'cast5-cfb', 'des-cfb'})
 
 class BaseCipher(object):
     PYTHON = False
@@ -286,6 +289,7 @@ class CipherFactory:
         self.key = key
         self.name = name
         self.ota = ota
+        self.legacy = name.removesuffix('-py') in LEGACY_CIPHERS
         self.plugins = list(plugins or ())
         self.datagram = PacketCipher(cipher, key, name)
 
@@ -327,7 +331,7 @@ def get_cipher(cipher_key):
         try:
             if __import__('Crypto').version_info < (3, 4):
                 cipher = None
-        except Exception:
+        except ImportError:
             cipher = None
     if cipher is None:
         cipher = MAP_PY.get(cipher_name)
@@ -337,4 +341,10 @@ def get_cipher(cipher_key):
     if cipher is None:
         return 'this cipher needs library: "pip3 install pycryptodome"', None
     cipher_name += ('-py' if cipher.PYTHON else '')
+    if cipher_name.removesuffix('-py') in LEGACY_CIPHERS:
+        warnings.warn(
+            f'legacy cipher {cipher_name!r} is retained for compatibility; prefer an AEAD cipher',
+            UserWarning,
+            stacklevel=2,
+        )
     return None, CipherFactory(cipher, key, cipher_name, ota)

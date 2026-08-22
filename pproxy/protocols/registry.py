@@ -1,10 +1,12 @@
 """Protocol dispatch and URI-scheme registry."""
 
+import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from .base import Direct
+from ..errors import ProtocolError
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
 from .transparent import Echo, Pf, Redir, SSH, Tunnel
@@ -106,8 +108,8 @@ async def accept(protos: Iterable[Any], reader: Any, **kw: Any) -> tuple[Any, ..
     for protocol in protos:
         try:
             user = await protocol.guess(reader, **kw)
-        except Exception:
-            raise Exception('Connection closed')
+        except (ProtocolError, asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
+            raise ProtocolError('Connection closed') from exc
         if user:
             ret = await protocol.accept(reader, user, **kw)
             while len(ret) < 4:

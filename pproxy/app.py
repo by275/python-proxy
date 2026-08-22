@@ -48,7 +48,7 @@ def main(args=None):
         asyncio.run(runtime.test_url(args.test, args.rserver))
         return
     if not args.listen and not args.ulisten:
-        args.listen.append(runtime.proxies_by_uri('http+socks4+socks5://127.0.0.1:8080/'))
+        args.listen.append(runtime.proxies_by_uri(runtime.DEFAULT_LISTENER_URI))
     args.httpget = {}
     if args.pac:
         pactext = 'function FindProxyForURL(u,h){' + (f'var b=/^(:?{args.block.__self__.pattern})$/i;if(b.test(h))return "";' if args.block else '')

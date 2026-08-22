@@ -35,6 +35,11 @@ class SecurityDefaultTests(unittest.TestCase):
         with self.assertRaises(Exception):
             server.proxies_by_uri("httpadmin://127.0.0.1:8081/")
 
+    def test_httpadmin_defaults_to_loopback(self):
+        option = server.proxies_by_uri("httpadmin://:8081/#admin:secret")
+
+        self.assertEqual(option.host_name, "127.0.0.1")
+
     def test_cipher_sessions_clone_plugin_state(self):
         error, factory = get_cipher("chacha20-py:test-key")
         self.assertIsNone(error)

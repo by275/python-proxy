@@ -1,17 +1,19 @@
 """HTTP parsing helpers and HTTP-family protocol implementations."""
 
 import base64
+import asyncio
 import re
 import urllib.parse
 
 from .. import admin, transport
 from ..config import netloc_split
 from ..errors import ProtocolError
+from ..runtime import HTTP_HEADER_LIMIT
 from .base import DRAIN_BUFFER_SIZE, BaseProtocol
 
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
-MAX_HTTP_HEADER_SIZE = 32 * 1024
+MAX_HTTP_HEADER_SIZE = HTTP_HEADER_LIMIT
 
 
 def _decode_header_value(value):
@@ -185,7 +187,9 @@ class HTTP(BaseProtocol):
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except (ConnectionError, OSError, EOFError):
             pass
         finally:
             stat_conn(-1)
@@ -244,8 +248,8 @@ class H2(HTTP):
         return await self.http_accept(
             user,
             headers[':method'],
-            headers[':path'],
-            headers[':authority'],
+            headers.get(':path', '/'),
+            headers.get(':authority'),
             '2.0',
             lines,
             '',
@@ -255,7 +259,7 @@ class H2(HTTP):
         )
 
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
-        headers = [(':method', 'CONNECT'), (':scheme', 'https'), (':path', '/'), (':authority', f'{host_name}:{port}')]
+        headers = [(':method', 'CONNECT'), (':authority', f'{host_name}:{port}')]
         if rauth:
             headers.append(('proxy-authorization', 'Basic ' + base64.b64encode(rauth)))
         writer_remote.send_headers(headers)

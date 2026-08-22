@@ -1,5 +1,7 @@
 """Shared protocol base classes and bidirectional stream behavior."""
 
+import asyncio
+
 DRAIN_BUFFER_SIZE = 256 * 1024
 
 
@@ -46,7 +48,9 @@ class BaseProtocol:
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except (ConnectionError, OSError, EOFError):
             pass
         finally:
             stat_conn(-1)

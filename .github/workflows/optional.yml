@@ -63,7 +63,10 @@ jobs:
           cache: pip
 
       - name: Install the selected optional extra
-        run: python -m pip install ".[${{ matrix.extra }}]"
+        run: python -m pip install -c constraints/optional.txt ".[${{ matrix.extra }}]"
 
       - name: Import the optional backend
         run: python -c "import importlib; importlib.import_module('${{ matrix.module }}')"
+
+      - name: Run optional adapter contracts
+        run: python -m unittest tests.test_optional_adapters tests.test_optional_runtime -v

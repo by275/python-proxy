@@ -6,12 +6,14 @@ import functools
 from . import proto
 from .errors import ProtocolError
 from . import server as runtime
+from .runtime import H2_STREAM_LIMIT
+from .transport.private import h2_begin_stream
 
 
 class ProxyH2(runtime.ProxySimple):
     """Proxy backend for HTTP/2 streams using the optional ``h2`` package."""
 
-    MAX_STREAMS = 1024
+    MAX_STREAMS = H2_STREAM_LIMIT
     MAX_STREAM_BUFFER = 1024 * 1024
 
     def __init__(self, sslserver, sslclient, **kw):
@@ -172,7 +174,7 @@ class ProxyH2(runtime.ProxySimple):
     async def wait_open_connection(self, host, port, local_addr, family):
         conn, streams, writer = await self.wait_h2_connection(local_addr, family)
         stream_id = conn.get_next_available_stream_id()
-        conn._begin_new_stream(stream_id, stream_id % 2)
+        h2_begin_stream(conn, stream_id, stream_id % 2)
         stream_reader, stream_writer = self.get_stream(conn, writer, stream_id)
         streams[stream_id] = (stream_reader, stream_writer)
         return stream_reader, stream_writer

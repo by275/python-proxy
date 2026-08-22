@@ -4,12 +4,21 @@ import asyncio
 import functools
 
 from . import server as runtime
+from .runtime import UDP_LIMIT
+from .transport.private import (
+    quic_connection,
+    quic_network_address,
+    quic_next_stream_id,
+    quic_prepare_stream,
+    quic_protocol,
+    quic_send_stream_data,
+)
 
 
 class ProxyQUIC(runtime.ProxySimple):
     """Proxy backend for QUIC streams using the optional ``aioquic`` package."""
 
-    MAX_UDP_FLOWS = 30
+    MAX_UDP_FLOWS = UDP_LIMIT
 
     def __init__(self, quicserver, quicclient, **kw):
         super().__init__(**kw)
@@ -21,9 +30,9 @@ class ProxyQUIC(runtime.ProxySimple):
 
     def patch_writer(self, writer):
         async def drain():
-            writer._transport.protocol.transmit()
+            quic_protocol(writer).transmit()
 
-        remote_addr = writer._transport.protocol._quic._network_paths[0].addr
+        remote_addr = quic_network_address(quic_protocol(writer))
         writer.get_extra_info = {"peername": remote_addr, "sockname": remote_addr}.get
         writer.drain = drain
         closed = False
@@ -84,18 +93,18 @@ class ProxyQUIC(runtime.ProxySimple):
                 oldest_addr, oldest_stream = next(iter(self.quic_udpmap.items()))
                 self.quic_udpmap.pop(oldest_addr, None)
                 self.quic_udp_replies.pop(oldest_stream, None)
-            stream_id = conn._quic.get_next_available_stream_id(False)
+            stream_id = quic_next_stream_id(conn, False)
             self.quic_udpmap[addr] = stream_id
             self.quic_udp_replies[stream_id] = reply
-            conn._quic._get_or_create_stream_for_send(stream_id)
-        conn._quic.send_stream_data(stream_id, data, False)
+            quic_prepare_stream(conn, stream_id)
+        quic_send_stream_data(conn, stream_id, data, False)
         conn.transmit()
 
     async def wait_open_connection(self, *args):
         await self.wait_quic_connection()
         conn = self.handshake.result()
-        stream_id = conn._quic.get_next_available_stream_id(False)
-        conn._quic._get_or_create_stream_for_send(stream_id)
+        stream_id = quic_next_stream_id(conn, False)
+        quic_prepare_stream(conn, stream_id)
         reader, writer = conn._create_stream(stream_id)
         self.patch_writer(writer)
         return reader, writer
@@ -110,7 +119,7 @@ class ProxyQUIC(runtime.ProxySimple):
                     stream_id = event.stream_id
                     addr = ('quic ' + self.bind, stream_id)
                     event.sendto = lambda data, addr: (
-                        protocol._quic.send_stream_data(stream_id, data, False),
+                        quic_send_stream_data(protocol, stream_id, data, False),
                         protocol.transmit(),
                     )
                     event.get_extra_info = {}.get
@@ -146,7 +155,7 @@ class ProxyH3(ProxyQUIC):
     """Proxy backend for HTTP/3 streams using the optional ``aioquic`` package."""
 
     def get_stream(self, conn, stream_id):
-        remote_addr = conn._quic._network_paths[0].addr
+        remote_addr = quic_network_address(conn)
         reader = asyncio.StreamReader()
 
         class StreamWriter:
@@ -190,7 +199,7 @@ class ProxyH3(ProxyQUIC):
         class Protocol(aioquic.asyncio.QuicConnectionProtocol):
             def __init__(protocol, *args, **kw):
                 super().__init__(*args, **kw)
-                protocol.http = aioquic.h3.connection.H3Connection(protocol._quic)
+                protocol.http = aioquic.h3.connection.H3Connection(quic_connection(protocol))
                 protocol.streams = {}
 
             def quic_event_received(protocol, event):
@@ -226,8 +235,8 @@ class ProxyH3(ProxyQUIC):
 
             def create_stream(protocol, stream_id=None):
                 if stream_id is None:
-                    stream_id = protocol._quic.get_next_available_stream_id(False)
-                    protocol._quic._get_or_create_stream_for_send(stream_id)
+                    stream_id = quic_next_stream_id(protocol, False)
+                    quic_prepare_stream(protocol, stream_id)
                 reader, writer = self.get_stream(protocol, stream_id)
                 protocol.streams[stream_id] = (reader, writer)
                 return reader, writer

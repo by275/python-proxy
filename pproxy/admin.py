@@ -1,7 +1,9 @@
 import json
 
+from .runtime import ADMIN_BODY_LIMIT
+
 config = {}
-MAX_ADMIN_BODY = 64 * 1024
+MAX_ADMIN_BODY = ADMIN_BODY_LIMIT
 
 
 async def reply_http(reply, ver, code, content):

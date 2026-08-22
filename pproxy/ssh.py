@@ -40,7 +40,7 @@ class ProxySSH(runtime.ProxySimple):
             self.sshconn = asyncio.get_running_loop().create_future()
             try:
                 import asyncssh
-            except Exception as exc:
+            except ImportError as exc:
                 raise Exception('Missing library: "pip3 install asyncssh"') from exc  # noqa: TRY002
             username, password = self.auth.decode().split(':', 1)
             if password.startswith(':'):

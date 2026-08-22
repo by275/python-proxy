@@ -172,7 +172,7 @@ class SS(SSR):
     def udp_pack(self, host_name, port, data):
         try:
             return b'\x01' + socket.inet_aton(host_name) + port.to_bytes(2, 'big') + data
-        except Exception:
+        except (OSError, ValueError, OverflowError):
             pass
         return b'\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big') + data
 

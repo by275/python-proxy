@@ -1,10 +1,15 @@
 import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections, contextlib
-from asyncio import create_task
 from typing import Any, Callable
 from . import proto
 from . import admin
 from . import relay
-from .runtime import TaskRegistry
+from .runtime import (
+    DEFAULT_LISTENER_URI,
+    TaskRegistry,
+    UDP_LIMIT,
+    UDP_TASK_LIMIT,
+    is_unauthenticated_wildcard,
+)
 from . import transport
 from .config import ProxyConfig
 from .errors import require
@@ -12,8 +17,6 @@ from .errors import require
 from .__doc__ import *
 
 SOCKET_TIMEOUT = transport.DEFAULT_TIMEOUT
-UDP_LIMIT = 30
-UDP_TASK_LIMIT = 256
 DUMMY = lambda s: s
 
 class AuthTable(object):
@@ -47,9 +50,6 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
 relay_with_taskgroup = relay.relay_with_taskgroup
 
 
-def _create_task(awaitable, registry=None):
-    return registry.create_task(awaitable) if registry is not None else create_task(awaitable)
-
 def schedule(rserver, salgorithm, host_name, port):
     filter_cond = lambda o: o.alive and o.match_rule(host_name, port)
     if salgorithm == 'fa':
@@ -68,6 +68,7 @@ def schedule(rserver, salgorithm, host_name, port):
         raise Exception('Unknown scheduling algorithm') #Unreachable
 
 async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, sslserver, debug=0, authtime=86400*30, block=None, salgorithm='fa', verbose=DUMMY, modstat=lambda u,r,h:lambda i:DUMMY, task_registry=None, **kwargs):
+    remote_ip = 'unknown_remote_ip'
     try:
         reader, writer = proto.sslwrap(reader, writer, sslserver, True, None, verbose, task_registry)
         if unix:
@@ -81,9 +82,9 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
         reader_cipher, _ = await prepare_ciphers(cipher, reader, writer, server_side=False)
         lproto, user, host_name, port, client_connected = await proto.accept(protos, reader=reader, writer=writer, authtable=AuthTable(remote_ip, authtime), reader_cipher=reader_cipher, sock=writer.get_extra_info('socket'), **kwargs)
         if host_name == 'echo':
-            _create_task(lproto.channel(reader, writer, DUMMY, DUMMY), task_registry)
+            await lproto.channel(reader, writer, DUMMY, DUMMY)
         elif host_name == 'empty':
-            _create_task(lproto.channel(reader, writer, None, DUMMY), task_registry)
+            await lproto.channel(reader, writer, None, DUMMY)
         elif block and block(host_name):
             raise Exception('BLOCK ' + host_name)
         else:
@@ -105,15 +106,20 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
                 lproto.channel(reader_remote, writer, m(2+roption.direct), m(4+roption.direct)),
                 lchannel(reader, writer_remote, m(roption.direct), roption.connection_change),
             )
+    except asyncio.CancelledError:
+        raise
     except Exception as ex:
         if not isinstance(ex, asyncio.TimeoutError) and not str(ex).startswith('Connection closed'):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
-        try: writer.close()
-        except Exception: pass
+        try:
+            writer.close()
+        except (AttributeError, OSError):
+            pass
         if debug:
             raise
 
 async def datagram_handler(writer, data, addr, protos, urserver, block, cipher, salgorithm, verbose=DUMMY, **kwargs):
+    remote_ip = 'unknown_remote_ip'
     try:
         remote_ip, remote_port, *_ = addr
         remote_text = f'{remote_ip}:{remote_port}'
@@ -133,6 +139,8 @@ async def datagram_handler(writer, data, addr, protos, urserver, block, cipher, 
                 rdata = lproto.udp_pack(host_name, port, rdata)
                 writer.sendto(cipher.datagram.encrypt(rdata) if cipher else rdata, addr)
             await roption.udp_open_connection(host_name, port, data, addr, reply)
+    except asyncio.CancelledError:
+        raise
     except Exception as ex:
         if not str(ex).startswith('Connection closed'):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
@@ -159,7 +167,7 @@ async def check_server_alive(interval, rserver, verbose):
                 if isinstance(remote, ProxyBackward):
                     writer.write(b'\x00')
                 writer.close()
-            except Exception:
+            except (AttributeError, OSError):
                 pass
 
 class ProxyDirect(object):
@@ -169,6 +177,7 @@ class ProxyDirect(object):
         self.unix = False
         self.alive = True
         self.connections = 0
+        self.writers = set()
         self.udpmap = {}
         self.udp_lru = collections.OrderedDict()
         self.task_registry = TaskRegistry()
@@ -239,6 +248,8 @@ class ProxyDirect(object):
 
     def close(self):
         self.task_registry.cancel_all()
+        for writer in tuple(self.writers):
+            writer.close()
         for prot in tuple(self.udpmap.values()):
             if getattr(prot, 'transport', None):
                 prot.transport.close()
@@ -266,7 +277,7 @@ class ProxyDirect(object):
             family = 0 if local_addr is None else socket.AF_INET6 if ':' in local_addr[0] else socket.AF_INET
             wait = self.wait_open_connection(host, port, local_addr, family)
             reader, writer = await asyncio.wait_for(wait, timeout=timeout)
-        except Exception as ex:
+        except asyncio.CancelledError:
             raise
         return reader, writer
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
@@ -364,10 +375,18 @@ class ProxySimple(ProxyDirect):
         return await self.jump.prepare_connection(reader_remote, writer_remote, host, port)
     def start_server(self, args, stream_handler=stream_handler):
         handler = functools.partial(stream_handler, **vars(self), **args)
+
+        async def tracked_handler(reader, writer):
+            self.writers.add(writer)
+            try:
+                await handler(reader, writer)
+            finally:
+                self.writers.discard(writer)
+
         if self.unix:
-            return asyncio.start_unix_server(handler, path=self.bind)
+            return asyncio.start_unix_server(tracked_handler, path=self.bind)
         else:
-            return asyncio.start_server(handler, host=self.host_name, port=self.port, reuse_port=args.get('ruport'))
+            return asyncio.start_server(tracked_handler, host=self.host_name, port=self.port, reuse_port=args.get('ruport'))
 
 class ProxyBackward(ProxySimple):
     def __init__(self, backward, backward_num, **kw):
@@ -387,7 +406,7 @@ class ProxyBackward(ProxySimple):
             data = await transport.read(reader, 1, timeout=None)
             if data:
                 transport.rollback(reader, data)
-        except Exception:
+        except (ConnectionError, OSError, EOFError, asyncio.TimeoutError):
             pass
         finally:
             if reader.at_eof() and not writer.is_closing():
@@ -411,7 +430,7 @@ class ProxyBackward(ProxySimple):
         for writer in self.writers:
             try:
                 writer.close()
-            except Exception:
+            except (AttributeError, OSError):
                 pass
 
     async def wait_closed(self):
@@ -459,7 +478,7 @@ class ProxyBackward(ProxySimple):
             except Exception as ex:
                 try:
                     writer.close()
-                except Exception:
+                except (AttributeError, OSError):
                     pass
                 if not self.closed:
                     await asyncio.sleep(errwait)
@@ -487,11 +506,6 @@ def compile_rule(filename: str) -> Callable[[str], Any]:
     with open(filename) as f:
         return re.compile('(:?'+''.join('|'.join(i.strip() for i in f if i.strip() and not i.startswith('#')))+')$').match
 
-
-def is_unauthenticated_wildcard(option: Any) -> bool:
-    """Return whether a listener can accept unauthenticated public traffic."""
-    host = getattr(option, 'host_name', None)
-    return not getattr(option, 'unix', False) and host in (None, '', '0.0.0.0', '::') and not getattr(option, 'users', None)
 
 def split_uri_jumps(uri_jumps: str) -> list[str]:
     """Split chained proxy URIs while preserving URI contents."""
@@ -535,7 +549,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
     if 'quic' in rawprotos or 'h3' in protonames:
         try:
             import ssl, aioquic.quic.configuration
-        except Exception:
+        except ImportError:
             raise Exception('Missing library: "pip3 install aioquic"')
         quicserver = aioquic.quic.configuration.QuicConfiguration(is_client=False, max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT)
         quicclient = aioquic.quic.configuration.QuicConfiguration(max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT*5)
@@ -545,7 +559,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
     if 'h2' in rawprotos:
         try:
             import h2
-        except Exception:
+        except ImportError:
             raise Exception('Missing library: "pip3 install h2"')
     urlpath, _, plugins = url.path.partition(',')
     urlpath, _, lbind = urlpath.partition('@')
@@ -572,7 +586,11 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
                     raise argparse.ArgumentTypeError(err_str)
                 cipher.plugins.append(plugin)
     if loc:
-        host_name, port = proto.netloc_split(loc, default_port=22 if 'ssh' in rawprotos else 8080)
+        host_name, port = proto.netloc_split(
+            loc,
+            default_host='127.0.0.1' if 'httpadmin' in protonames else None,
+            default_port=22 if 'ssh' in rawprotos else 8080,
+        )
     else:
         host_name = port = None
     if url.fragment.startswith('#'):
