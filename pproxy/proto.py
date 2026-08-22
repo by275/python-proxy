@@ -1,6 +1,7 @@
 import asyncio, socket, urllib.parse, re, base64, hmac, struct, hashlib, io, os
 from asyncio import create_task
 from . import admin
+from . import transport
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
@@ -76,19 +77,19 @@ def netloc_split(loc, default_host=None, default_port=None):
 
 async def socks_address_stream(reader, n):
     if n in (1, 17):
-        data = await reader.read_n(4)
+        data = await transport.read_exactly(reader, 4)
         host_name = socket.inet_ntoa(data)
     elif n in (3, 19):
-        host_length = await reader.read_n(1)
-        host_data = await reader.read_n(host_length[0])
+        host_length = await transport.read_exactly(reader, 1)
+        host_data = await transport.read_exactly(reader, host_length[0])
         data = host_length + host_data
         host_name = host_data.decode()
     elif n in (4, 20):
-        data = await reader.read_n(16)
+        data = await transport.read_exactly(reader, 16)
         host_name = socket.inet_ntop(socket.AF_INET6, data)
     else:
         raise Exception(f'Unknown address header {n}')
-    data_port = await reader.read_n(2)
+    data_port = await transport.read_exactly(reader, 2)
     return host_name, int.from_bytes(data_port, 'big'), data+data_port
 
 def socks_address(reader, n):
@@ -142,7 +143,7 @@ class Direct(BaseProtocol):
 
 class Trojan(BaseProtocol):
     async def guess(self, reader, users, **kw):
-        header = await reader.read_w(56)
+        header = await transport.read(reader, 56)
         if users:
             for user in users:
                 if hashlib.sha224(user).hexdigest().encode() == header:
@@ -150,13 +151,13 @@ class Trojan(BaseProtocol):
         else:
             if hashlib.sha224(b'').hexdigest().encode() == header:
                 return True
-        reader.rollback(header)
+        transport.rollback(reader, header)
     async def accept(self, reader, user, **kw):
-        assert await reader.read_n(2) == b'\x0d\x0a'
-        if (await reader.read_n(1))[0] != 1:
+        assert await transport.read_exactly(reader, 2) == b'\x0d\x0a'
+        if (await transport.read_exactly(reader, 1))[0] != 1:
             raise Exception('Connection closed')
-        host_name, port, _ = await socks_address_stream(reader, (await reader.read_n(1))[0])
-        assert await reader.read_n(2) == b'\x0d\x0a'
+        host_name, port, _ = await socks_address_stream(reader, (await transport.read_exactly(reader, 1))[0])
+        assert await transport.read_exactly(reader, 2) == b'\x0d\x0a'
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         toauth = hashlib.sha224(rauth or b'').hexdigest().encode()
@@ -165,18 +166,18 @@ class Trojan(BaseProtocol):
 class SSR(BaseProtocol):
     async def guess(self, reader, users, **kw):
         if users:
-            header = await reader.read_w(max(len(i) for i in users))
-            reader.rollback(header)
+            header = await transport.read(reader, max(len(i) for i in users))
+            transport.rollback(reader, header)
             user = next(filter(lambda x: x == header[:len(x)], users), None)
             if user is None:
                 return
-            await reader.read_n(len(user))
+            await transport.read_exactly(reader, len(user))
             return user
-        header = await reader.read_w(1)
-        reader.rollback(header)
+        header = await transport.read(reader, 1)
+        transport.rollback(reader, header)
         return header[0] in (1, 3, 4, 17, 19, 20)
     async def accept(self, reader, user, **kw):
-        host_name, port, data = await socks_address_stream(reader, (await reader.read_n(1))[0])
+        host_name, port, data = await socks_address_stream(reader, (await transport.read_exactly(reader, 1))[0])
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         writer_remote.write(rauth + b'\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big'))
@@ -217,13 +218,13 @@ class SS(SSR):
             return o(len(data).to_bytes(2, 'big') + checksum[:10] + data)
         writer.write = write
     async def accept(self, reader, user, reader_cipher, **kw):
-        header = await reader.read_n(1)
+        header = await transport.read_exactly(reader, 1)
         ota = (header[0] & 0x10 == 0x10)
         host_name, port, data = await socks_address_stream(reader, header[0])
         assert ota or not reader_cipher or not reader_cipher.ota, 'SS client must support OTA'
         if ota and reader_cipher:
             checksum = hmac.new(reader_cipher.iv+reader_cipher.key, header+data, hashlib.sha1).digest()
-            assert checksum[:10] == await reader.read_n(10), 'Unknown OTA checksum'
+            assert checksum[:10] == await transport.read_exactly(reader, 10), 'Unknown OTA checksum'
             self.patch_ota_reader(reader_cipher, reader)
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, writer_cipher_r, **kw):
@@ -264,15 +265,15 @@ class SS(SSR):
 
 class Socks4(BaseProtocol):
     async def guess(self, reader, **kw):
-        header = await reader.read_w(1)
+        header = await transport.read(reader, 1)
         if header == b'\x04':
             return True
-        reader.rollback(header)
+        transport.rollback(reader, header)
     async def accept(self, reader, user, writer, users, authtable, **kw):
-        assert await reader.read_n(1) == b'\x01'
-        port = int.from_bytes(await reader.read_n(2), 'big')
-        ip = await reader.read_n(4)
-        userid = (await reader.read_until(b'\x00'))[:-1]
+        assert await transport.read_exactly(reader, 1) == b'\x01'
+        port = int.from_bytes(await transport.read_exactly(reader, 2), 'big')
+        ip = await transport.read_exactly(reader, 4)
+        userid = (await transport.read_until(reader, b'\x00'))[:-1]
         user = authtable.authed()
         if users:
             if userid in users:
@@ -286,25 +287,25 @@ class Socks4(BaseProtocol):
         loop = asyncio.get_running_loop()
         ip = socket.inet_aton((await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
         writer_remote.write(b'\x04\x01' + port.to_bytes(2, 'big') + ip + rauth + b'\x00')
-        assert await reader_remote.read_n(2) == b'\x00\x5a'
-        await reader_remote.read_n(6)
+        assert await transport.read_exactly(reader_remote, 2) == b'\x00\x5a'
+        await transport.read_exactly(reader_remote, 6)
 
 class Socks5(BaseProtocol):
     async def guess(self, reader, **kw):
-        header = await reader.read_w(1)
+        header = await transport.read(reader, 1)
         if header == b'\x05':
             return True
-        reader.rollback(header)
+        transport.rollback(reader, header)
     async def accept(self, reader, user, writer, users, authtable, **kw):
-        methods = await reader.read_n((await reader.read_n(1))[0])
+        methods = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
         user = authtable.authed()
         if users and (not user or b'\x00' not in methods):
             if b'\x02' not in methods:
                 raise Exception(f'Unauthorized SOCKS')
             writer.write(b'\x05\x02')
-            assert (await reader.read_n(1))[0] == 1, 'Unknown SOCKS auth'
-            u = await reader.read_n((await reader.read_n(1))[0])
-            p = await reader.read_n((await reader.read_n(1))[0])
+            assert (await transport.read_exactly(reader, 1))[0] == 1, 'Unknown SOCKS auth'
+            u = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
+            p = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             user = u+b':'+p
             if user not in users:
                 raise Exception(f'Unauthorized SOCKS {u}:{p}')
@@ -315,24 +316,24 @@ class Socks5(BaseProtocol):
             writer.write(b'\x05\x00')
         if users:
             authtable.set_authed(user)
-        assert await reader.read_n(3) == b'\x05\x01\x00', 'Unknown SOCKS protocol'
-        header = await reader.read_n(1)
+        assert await transport.read_exactly(reader, 3) == b'\x05\x01\x00', 'Unknown SOCKS protocol'
+        header = await transport.read_exactly(reader, 1)
         host_name, port, data = await socks_address_stream(reader, header[0])
         writer.write(b'\x05\x00\x00' + header + data)
         return user, host_name, port
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         if rauth:
             writer_remote.write(b'\x05\x01\x02')
-            assert await reader_remote.read_n(2) == b'\x05\x02'
+            assert await transport.read_exactly(reader_remote, 2) == b'\x05\x02'
             writer_remote.write(b'\x01' + b''.join(packstr(i) for i in rauth.split(b':', 1)))
-            assert await reader_remote.read_n(2) == b'\x01\x00', 'Unknown SOCKS auth'
+            assert await transport.read_exactly(reader_remote, 2) == b'\x01\x00', 'Unknown SOCKS auth'
         else:
             writer_remote.write(b'\x05\x01\x00')
-            assert await reader_remote.read_n(2) == b'\x05\x00'
+            assert await transport.read_exactly(reader_remote, 2) == b'\x05\x00'
         writer_remote.write(b'\x05\x01\x00\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big'))
-        assert await reader_remote.read_n(3) == b'\x05\x00\x00'
-        header = (await reader_remote.read_n(1))[0]
-        await reader_remote.read_n(6 if header == 1 else (18 if header == 4 else (await reader_remote.read_n(1))[0]+2))
+        assert await transport.read_exactly(reader_remote, 3) == b'\x05\x00\x00'
+        header = (await transport.read_exactly(reader_remote, 1))[0]
+        await transport.read_exactly(reader_remote, 6 if header == 1 else (18 if header == 4 else (await transport.read_exactly(reader_remote, 1))[0]+2))
     def udp_accept(self, data, **kw):
         reader = io.BytesIO(data)
         if reader.read(3) != b'\x00\x00\x00':
@@ -347,11 +348,11 @@ class Socks5(BaseProtocol):
 
 class HTTP(BaseProtocol):
     async def guess(self, reader, **kw):
-        header = await reader.read_w(4)
-        reader.rollback(header)
+        header = await transport.read(reader, 4)
+        transport.rollback(reader, header)
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
     async def accept(self, reader, user, writer, **kw):
-        lines = await reader.read_until(b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n')
         method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
@@ -399,7 +400,7 @@ class HTTP(BaseProtocol):
             return user, host_name, port, connected
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         writer_remote.write(f'CONNECT {host_name}:{port} HTTP/1.1\r\nHost: {host_name}:{port}'.encode() + (b'\r\nProxy-Authorization: Basic '+base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n')
-        await reader_remote.read_until(b'\r\n\r\n')
+        await transport.read_until(reader_remote, b'\r\n\r\n')
     async def http_channel(self, reader, writer, stat_bytes, stat_conn):
         try:
             stat_conn(1)
@@ -411,7 +412,7 @@ class HTTP(BaseProtocol):
                 request_line, sep, _ = data.partition(b'\r\n')
                 if sep and HTTP_METHOD_LINE.match(request_line):
                     if b'\r\n\r\n' not in data:
-                        data += await reader.readuntil(b'\r\n\r\n')
+                        data += await transport.read_until(reader, b'\r\n\r\n')
                     lines, data = data.split(b'\r\n\r\n', 1)
                     method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines)
                     newpath = urllib.parse.urlparse(path)._replace(netloc='', scheme='').geturl()
@@ -480,7 +481,7 @@ class H3(H2):
 
 class HTTPAdmin(HTTP):
     async def accept(self, reader, user, writer, **kw):
-        lines = await reader.read_until(b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n')
         method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
         headers, lines = decode_http_header_block(filtered_headers)
         async def reply(code, message, body=None, wait=False):
@@ -493,7 +494,7 @@ class HTTPAdmin(HTTP):
         content_length = int(headers.get('Content-Length','0'))
         content = ''
         if content_length > 0:
-            content = await reader.read_n(content_length)
+            content = await transport.read_exactly(reader, content_length)
 
         url = urllib.parse.urlparse(path)
         if url.hostname is not None:
@@ -570,8 +571,8 @@ class Tunnel(Transparent):
 
 class WS(BaseProtocol):
     async def guess(self, reader, **kw):
-        header = await reader.read_w(4)
-        reader.rollback(header)
+        header = await transport.read(reader, 4)
+        transport.rollback(reader, header)
         return header == b'GET '
     def patch_ws_stream(self, reader, writer, masked=False):
         data_len, mask_key, opcode, _buffer = None, None, None, bytearray()
@@ -625,7 +626,7 @@ class WS(BaseProtocol):
             return write_frame(0x2, data)
         writer.write = write
     async def accept(self, reader, user, writer, users, authtable, sock, **kw):
-        lines = await reader.read_until(b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n')
         method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
         url = urllib.parse.urlparse(path)
         if users:
@@ -652,7 +653,7 @@ class WS(BaseProtocol):
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
         seckey = base64.b64encode(os.urandom(16)).decode()
         writer_remote.write(f'GET / HTTP/1.1\r\nHost: {myhost}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {seckey}\r\nSec-WebSocket-Protocol: chat\r\nSec-WebSocket-Version: 13'.encode() + (b'\r\nProxy-Authorization: Basic '+base64.b64encode(rauth) if rauth else b'') + b'\r\n\r\n')
-        await reader_remote.read_until(b'\r\n\r\n')
+        await transport.read_until(reader_remote, b'\r\n\r\n')
         self.patch_ws_stream(reader_remote, writer_remote, True)
 
 class Echo(Transparent):

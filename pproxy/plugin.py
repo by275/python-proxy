@@ -1,4 +1,5 @@
 import datetime, zlib, os, binascii, hmac, hashlib, time, random, collections
+from . import transport
 
 packstr = lambda s, n=2: len(s).to_bytes(n, 'big') + s
 toint = lambda s, o='big': int.from_bytes(s, o)
@@ -22,14 +23,14 @@ class Origin_Plugin(BasePlugin):
 
 class Http_Simple_Plugin(BasePlugin):
     async def init_client_data(self, reader, writer, cipher):
-        buf = await reader.read_until(b'\r\n\r\n')
+        buf = await transport.read_until(reader, b'\r\n\r\n')
         data = buf.split(b' ')[:2]
         data = bytes.fromhex(data[1][1:].replace(b'%',b'').decode())
         reader._buffer[0:0] = data
         writer.write(b'HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Encoding: gzip\r\nContent-Type: text/html\r\nDate: ' + datetime.datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT').encode() + b'\r\nServer: nginx\r\nVary: Accept-Encoding\r\n\r\n')
     async def init_server_data(self, reader, writer, cipher, raddr):
         writer.write(f'GET / HTTP/1.1\r\nHost: {raddr}\r\nUser-Agent: curl\r\nAccept-Encoding: gzip, deflate\r\nConnection: keep-alive\r\n\r\n'.encode())
-        await reader.read_until(b'\r\n\r\n')
+        await transport.read_until(reader, b'\r\n\r\n')
 
 TIMESTAMP_TOLERANCE = 5 * 60
 
@@ -37,8 +38,8 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
     CACHE = collections.deque(maxlen = 100)
     async def init_client_data(self, reader, writer, cipher):
         key = cipher.cipher(cipher.key).key
-        assert await reader.read_n(3) == b'\x16\x03\x01'
-        header = await reader.read_n(toint(await reader.read_n(2)))
+        assert await transport.read_exactly(reader, 3) == b'\x16\x03\x01'
+        header = await transport.read_exactly(reader, toint(await transport.read_exactly(reader, 2)))
         assert header[:2] == b'\x01\x00'
         assert header[4:6] == b'\x03\x03'
         cacheid = header[6:28]
@@ -155,4 +156,3 @@ def get_plugin(plugin_name):
     if plugin_name not in PLUGIN:
         return f'existing plugins: {sorted(PLUGIN.keys())}', None
     return None, PLUGIN[plugin_name]()
-

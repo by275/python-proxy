@@ -2,22 +2,13 @@ import argparse, time, re, asyncio, functools, base64, random, urllib.parse, soc
 from asyncio import create_task
 from . import proto
 from . import admin
+from . import transport
 
 from .__doc__ import *
 
-SOCKET_TIMEOUT = 60
+SOCKET_TIMEOUT = transport.DEFAULT_TIMEOUT
 UDP_LIMIT = 30
 DUMMY = lambda s: s
-
-def patch_StreamReader(c=asyncio.StreamReader):
-    c.read_w = lambda self, n: asyncio.wait_for(self.read(n), timeout=SOCKET_TIMEOUT)
-    c.read_n = lambda self, n: asyncio.wait_for(self.readexactly(n), timeout=SOCKET_TIMEOUT)
-    c.read_until = lambda self, s: asyncio.wait_for(self.readuntil(s), timeout=SOCKET_TIMEOUT)
-    c.rollback = lambda self, s: self._buffer.__setitem__(slice(0, 0), s)
-def patch_StreamWriter(c=asyncio.StreamWriter):
-    c.is_closing = lambda self: self._transport.is_closing() # Python 3.6 fix
-patch_StreamReader()
-patch_StreamWriter()
 
 class AuthTable(object):
     def __init__(self, remote_ip, authtime):
@@ -708,7 +699,7 @@ class ProxyBackward(ProxySimple):
         try:
             data = await reader.read(1)
             if data:
-                reader.rollback(data)
+                transport.rollback(reader, data)
         except Exception:
             pass
         finally:
@@ -749,11 +740,11 @@ class ProxyBackward(ProxySimple):
                 writer.write(self.server.auth)
                 self.writers.add(writer)
                 try:
-                    data = await reader.read_n(1)
+                    data = await transport.read_exactly(reader, 1)
                 except asyncio.TimeoutError:
                     data = None
                 if data and data[0] != 0:
-                    reader.rollback(data)
+                    transport.rollback(reader, data)
                     create_task(handler(reader, writer))
                 else:
                     writer.close()
@@ -775,7 +766,7 @@ class ProxyBackward(ProxySimple):
                 auth = b'\x01'+auth
             if auth:
                 try:
-                    assert auth == (await reader.read_n(len(auth)))
+                    assert auth == (await transport.read_exactly(reader, len(auth)))
                 except Exception:
                     return
             await self.conn.put((reader, writer, create_task(self.watch_connection(reader, writer))))
@@ -915,7 +906,7 @@ async def test_url(url, rserver):
             sslclient.verify_mode = ssl.CERT_NONE
             reader, writer = proto.sslwrap(reader, writer, sslclient, False, host_name)
         writer.write(initbuf)
-        headers = await reader.read_until(b'\r\n\r\n')
+        headers = await transport.read_until(reader, b'\r\n\r\n')
         print(headers.decode()[:-4])
         print(f'--------------------------------')
         body = bytearray()
