@@ -2,6 +2,7 @@ import asyncio, socket, urllib.parse, re, base64, hmac, struct, hashlib, io, os
 from asyncio import create_task
 from . import admin
 from . import transport
+from . import websocket
 from .errors import require
 from . import tls
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
@@ -61,11 +62,7 @@ def decode_http_header_block(header_block):
     return headers, '\r\n'.join(_decode_header_value(line) for line in header_lines)
 
 
-def xor_mask_bytes(data, mask_key):
-    masked = bytearray(data)
-    for index, value in enumerate(masked):
-        masked[index] = value ^ mask_key[index % 4]
-    return bytes(masked)
+xor_mask_bytes = websocket.xor_mask_bytes
 
 def netloc_split(loc, default_host=None, default_port=None):
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
@@ -578,56 +575,7 @@ class WS(BaseProtocol):
         transport.rollback(reader, header)
         return header == b'GET '
     def patch_ws_stream(self, reader, writer, masked=False):
-        data_len, mask_key, opcode, _buffer = None, None, None, bytearray()
-        raw_write = writer.write
-        def write_frame(opcode, payload=b''):
-            plen = len(payload)
-            second = bytes([(plen | 0x80) if masked else plen]) if plen < 126 else \
-                     (b'\xfe' if masked else b'\x7e') + plen.to_bytes(2, 'big') if plen < 65536 else \
-                     (b'\xff' if masked else b'\x7f') + plen.to_bytes(8, 'big')
-            if masked:
-                local_mask_key = os.urandom(4)
-                payload = xor_mask_bytes(payload, local_mask_key)
-                return raw_write(bytes([0x80 | opcode]) + second + local_mask_key + payload)
-            return raw_write(bytes([0x80 | opcode]) + second + payload)
-        def feed_data(s, o=reader.feed_data):
-            nonlocal data_len, mask_key, opcode
-            _buffer.extend(s)
-            while 1:
-                if data_len is None:
-                    if len(_buffer) < 2:
-                        break
-                    opcode = _buffer[0] & 0x0f
-                    required = 2 + (4 if _buffer[1]&128 else 0)
-                    p = _buffer[1] & 127
-                    required += 2 if p == 126 else 8 if p == 127 else 0
-                    if len(_buffer) < required:
-                        break
-                    data_len = int.from_bytes(_buffer[2:4], 'big') if p == 126 else int.from_bytes(_buffer[2:10], 'big') if p == 127 else p
-                    mask_key = _buffer[required-4:required] if _buffer[1]&128 else None
-                    del _buffer[:required]
-                else:
-                    if len(_buffer) < data_len:
-                        break
-                    data = _buffer[:data_len]
-                    if mask_key:
-                        data = xor_mask_bytes(data, mask_key)
-                    del _buffer[:data_len]
-                    data_len = None
-                    if opcode == 0x9:  # ping
-                        write_frame(0xA, data)
-                    elif opcode in (0x8, 0xa):  # close, pong
-                        pass
-                    else:
-                        o(data)
-        reader.feed_data = feed_data
-        buffered = transport.take_buffer(reader)
-        if buffered:
-            feed_data(buffered)
-        def write(data, o=writer.write):
-            if not data: return
-            return write_frame(0x2, data)
-        writer.write = write
+        return websocket.patch_stream(reader, writer, masked)
     async def accept(self, reader, user, writer, users, authtable, sock, **kw):
         lines = await transport.read_until(reader, b'\r\n\r\n')
         method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
