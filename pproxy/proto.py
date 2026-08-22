@@ -7,6 +7,7 @@ from .errors import require
 from . import tls
 from . import config
 from .protocols import address as address_protocol
+from .protocols import base as base_protocol
 from .protocols import http as http_protocol
 
 HTTP_LINE = http_protocol.HTTP_LINE
@@ -17,8 +18,10 @@ decode_http_header_block = http_protocol.decode_http_header_block
 socks_address_stream = address_protocol.socks_address_stream
 socks_address = address_protocol.socks_address
 netloc_split = config.netloc_split
+BaseProtocol = base_protocol.BaseProtocol
+Direct = base_protocol.Direct
+DRAIN_BUFFER_SIZE = base_protocol.DRAIN_BUFFER_SIZE
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
-DRAIN_BUFFER_SIZE = 256 * 1024
 
 
 async def drain_if_needed(writer, force=False):
@@ -27,50 +30,6 @@ async def drain_if_needed(writer, force=False):
 
 
 xor_mask_bytes = websocket.xor_mask_bytes
-
-class BaseProtocol:
-    def __init__(self, param):
-        self.param = param
-    @property
-    def name(self):
-        return self.__class__.__name__.lower()
-    def reuse(self):
-        return False
-    def udp_accept(self, data, **kw):
-        raise Exception(f'{self.name} don\'t support UDP server')
-    def udp_connect(self, rauth, host_name, port, data, **kw):
-        raise Exception(f'{self.name} don\'t support UDP client')
-    def udp_unpack(self, data):
-        return data
-    def udp_pack(self, host_name, port, data):
-        return data
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
-        raise Exception(f'{self.name} don\'t support client')
-    async def channel(self, reader, writer, stat_bytes, stat_conn):
-        try:
-            stat_conn(1)
-            pending_drain = 0
-            read = reader.read
-            while not reader.at_eof() and not writer.is_closing():
-                data = await read(65536)
-                if not data:
-                    break
-                if stat_bytes is None:
-                    continue
-                stat_bytes(len(data))
-                writer.write(data)
-                pending_drain += len(data)
-                if pending_drain >= DRAIN_BUFFER_SIZE:
-                    await writer.drain()
-                    pending_drain = 0
-        except Exception:
-            pass
-        finally:
-            stat_conn(-1)
-            writer.close()
-
-class Direct(BaseProtocol):
-    pass
 
 class Trojan(BaseProtocol):
     async def guess(self, reader, users, **kw):
