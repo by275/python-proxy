@@ -75,7 +75,9 @@ python3 tests/benchmark_proxy.py --requests 5000 --concurrency 8 --payload-size 
 
 The table reports the median of the three runs. The parser benchmark was run
 in five-run baseline/final batches; the values below use the median of each
-batch. The final source was commit `1cdc5c3`.
+batch. The final source was commit `6416747`; the intervening changes only
+corrected source-checkout version reporting and do not affect the measured
+proxy paths.
 
 | Benchmark | Structural baseline | Final | Change |
 | --- | ---: | ---: | ---: |
