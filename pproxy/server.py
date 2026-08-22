@@ -69,7 +69,7 @@ def schedule(rserver, salgorithm, host_name, port):
 
 async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, sslserver, debug=0, authtime=86400*30, block=None, salgorithm='fa', verbose=DUMMY, modstat=lambda u,r,h:lambda i:DUMMY, task_registry=None, **kwargs):
     try:
-        reader, writer = proto.sslwrap(reader, writer, sslserver, True, None, verbose)
+        reader, writer = proto.sslwrap(reader, writer, sslserver, True, None, verbose, task_registry)
         if unix:
             remote_ip, server_ip, remote_text = 'local', None, 'unix_local'
         else:
@@ -303,7 +303,7 @@ class ProxySimple(ProxyDirect):
         self.sslserver = sslserver
         self.insecure_host_key = insecure_host_key
         self.jump = jump
-        self.udp_semaphore = asyncio.Semaphore(UDP_TASK_LIMIT)
+        self.udp_inflight = 0
     def logtext(self, host, port):
         return f' -> {self.rproto.name+("+ssl" if self.sslclient else "")} {self.bind}' + self.jump.logtext(host, port)
     def match_rule(self, host, port):
@@ -331,9 +331,15 @@ class ProxySimple(ProxyDirect):
             def connection_made(prot, transport):
                 prot.transport = transport
             def datagram_received(prot, data, addr):
+                if self.udp_inflight >= UDP_TASK_LIMIT:
+                    return
+                self.udp_inflight += 1
+
                 async def handle_datagram():
-                    async with self.udp_semaphore:
+                    try:
                         await datagram_handler(prot.transport, data, addr, **vars(self), **args)
+                    finally:
+                        self.udp_inflight -= 1
 
                 self.task_registry.create_task(handle_datagram(), name='udp-datagram')
         loop = asyncio.get_running_loop()
@@ -344,7 +350,14 @@ class ProxySimple(ProxyDirect):
         else:
             return asyncio.open_connection(host=self.host_name, port=self.port, local_addr=local_addr, family=family)
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
-        reader_remote, writer_remote = proto.sslwrap(reader_remote, writer_remote, self.sslclient, False, self.host_name)
+        reader_remote, writer_remote = proto.sslwrap(
+            reader_remote,
+            writer_remote,
+            self.sslclient,
+            False,
+            self.host_name,
+            task_registry=self.task_registry,
+        )
         _, writer_cipher_r = await prepare_ciphers(self.cipher, reader_remote, writer_remote, self.bind)
         whost, wport = self.jump.destination(host, port)
         await self.rproto.connect(reader_remote=reader_remote, writer_remote=writer_remote, rauth=self.auth, host_name=whost, port=wport, writer_cipher_r=writer_cipher_r, myhost=self.host_name, sock=writer_remote.get_extra_info('socket'))

@@ -8,7 +8,7 @@ import urllib.parse
 from .. import transport, websocket
 from ..config import netloc_split
 from .base import BaseProtocol
-from .http import parse_http_request_head
+from .http import MAX_HTTP_HEADER_SIZE, parse_http_request_head
 
 
 class WS(BaseProtocol):
@@ -21,7 +21,7 @@ class WS(BaseProtocol):
         return websocket.patch_stream(reader, writer, masked)
 
     async def accept(self, reader, user, writer, users, authtable, sock, **kw):
-        lines = await transport.read_until(reader, b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
         urllib.parse.urlparse(path)
         if users:

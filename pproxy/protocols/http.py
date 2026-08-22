@@ -11,6 +11,7 @@ from .base import DRAIN_BUFFER_SIZE, BaseProtocol
 
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
+MAX_HTTP_HEADER_SIZE = 32 * 1024
 
 
 def _decode_header_value(value):
@@ -71,7 +72,7 @@ class HTTP(BaseProtocol):
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
 
     async def accept(self, reader, user, writer, **kw):
-        lines = await transport.read_until(reader, b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
 
         async def reply(code, message, body=None, wait=False):

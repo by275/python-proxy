@@ -4,11 +4,15 @@ import asyncio
 import functools
 
 from . import proto
+from .errors import ProtocolError
 from . import server as runtime
 
 
 class ProxyH2(runtime.ProxySimple):
     """Proxy backend for HTTP/2 streams using the optional ``h2`` package."""
+
+    MAX_STREAMS = 1024
+    MAX_STREAM_BUFFER = 1024 * 1024
 
     def __init__(self, sslserver, sslclient, **kw):
         super().__init__(sslserver=None, sslclient=None, **kw)
@@ -27,6 +31,7 @@ class ProxyH2(runtime.ProxySimple):
             self.h2sslclient if client_side else self.h2sslserver,
             not client_side,
             None,
+            task_registry=self.task_registry,
         )
         config = h2.config.H2Configuration(client_side=client_side)
         conn = h2.connection.H2Connection(config=config)
@@ -40,11 +45,18 @@ class ProxyH2(runtime.ProxySimple):
                 if not data:
                     break
                 events = conn.receive_data(data)
-            except Exception:  # noqa: BLE001, S110 - preserve existing connection handling
-                pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self.handshake is not None and not self.handshake.done():
+                    self.handshake.set_exception(exc)
+                break
             writer.write(conn.data_to_send())
             for event in events:
                 if isinstance(event, h2.events.RequestReceived) and not client_side:
+                    if event.stream_id not in streams and len(streams) >= self.MAX_STREAMS:
+                        conn.reset_stream(event.stream_id, error_code=7)
+                        continue
                     if event.stream_id not in streams:
                         stream_reader, stream_writer = self.get_stream(conn, writer, event.stream_id)
                         streams[event.stream_id] = (stream_reader, stream_writer)
@@ -53,14 +65,21 @@ class ProxyH2(runtime.ProxySimple):
                         stream_reader, stream_writer = streams[event.stream_id]
                     stream_writer.headers.set_result(event.headers)
                 elif isinstance(event, h2.events.SettingsAcknowledged) and client_side:
-                    self.handshake.set_result((conn, streams, writer))
+                    if self.handshake is not None and not self.handshake.done():
+                        self.handshake.set_result((conn, streams, writer))
                 elif isinstance(event, h2.events.DataReceived):
-                    stream_reader, stream_writer = streams[event.stream_id]
+                    stream = streams.get(event.stream_id)
+                    if stream is None:
+                        continue
+                    stream_reader, stream_writer = stream
                     stream_reader.feed_data(event.data)
                     conn.acknowledge_received_data(len(event.data), event.stream_id)
                     writer.write(conn.data_to_send())
                 elif isinstance(event, (h2.events.StreamEnded, h2.events.StreamReset)):
-                    stream_reader, stream_writer = streams[event.stream_id]
+                    stream = streams.pop(event.stream_id, None)
+                    if stream is None:
+                        continue
+                    stream_reader, stream_writer = stream
                     stream_reader.feed_eof()
                     if not stream_writer.closed:
                         stream_writer.close()
@@ -71,6 +90,8 @@ class ProxyH2(runtime.ProxySimple):
                     stream_writer.window_update()
         writer.write(conn.data_to_send())
         writer.close()
+        if self.handshake is not None and not self.handshake.done():
+            self.handshake.set_exception(ConnectionError('HTTP/2 connection closed'))
 
     def get_stream(self, conn, writer, stream_id):
         reader = asyncio.StreamReader()
@@ -87,6 +108,8 @@ class ProxyH2(runtime.ProxySimple):
                 return writer.get_extra_info(key)
 
             def write(self, data):
+                if len(write_buffer) + len(data) > ProxyH2.MAX_STREAM_BUFFER:
+                    raise ProtocolError('HTTP/2 stream write buffer limit exceeded')
                 write_buffer.extend(data)
                 write_wait.set()
 

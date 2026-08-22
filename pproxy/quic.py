@@ -9,11 +9,15 @@ from . import server as runtime
 class ProxyQUIC(runtime.ProxySimple):
     """Proxy backend for QUIC streams using the optional ``aioquic`` package."""
 
+    MAX_UDP_FLOWS = 30
+
     def __init__(self, quicserver, quicclient, **kw):
         super().__init__(**kw)
         self.quicserver = quicserver
         self.quicclient = quicclient
         self.handshake = None
+        self.quic_udpmap = {}
+        self.quic_udp_replies = {}
 
     def patch_writer(self, writer):
         async def drain():
@@ -47,12 +51,17 @@ class ProxyQUIC(runtime.ProxySimple):
             class Protocol(aioquic.asyncio.QuicConnectionProtocol):
                 def quic_event_received(protocol, event):
                     if isinstance(event, aioquic.quic.events.HandshakeCompleted):
-                        self.handshake.set_result(protocol)
+                        if self.handshake is not None and not self.handshake.done():
+                            self.handshake.set_result(protocol)
                     elif isinstance(event, aioquic.quic.events.ConnectionTerminated):
+                        if self.handshake is not None and not self.handshake.done():
+                            self.handshake.set_exception(ConnectionError('QUIC handshake terminated'))
                         self.handshake = None
                         self.quic_egress_acm = None
-                    elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in self.udpmap:
-                        self.udpmap[event.stream_id](self.udp_packet_unpack(event.data))
+                        self.quic_udpmap.clear()
+                        self.quic_udp_replies.clear()
+                    elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in self.quic_udp_replies:
+                        self.quic_udp_replies[event.stream_id](self.udp_packet_unpack(event.data))
                         return
                     super().quic_event_received(event)
 
@@ -68,12 +77,16 @@ class ProxyQUIC(runtime.ProxySimple):
     async def udp_open_connection(self, host, port, data, addr, reply):
         await self.wait_quic_connection()
         conn = self.handshake.result()
-        if addr in self.udpmap:
-            stream_id = self.udpmap[addr]
+        if addr in self.quic_udpmap:
+            stream_id = self.quic_udpmap[addr]
         else:
+            if len(self.quic_udpmap) >= self.MAX_UDP_FLOWS:
+                oldest_addr, oldest_stream = next(iter(self.quic_udpmap.items()))
+                self.quic_udpmap.pop(oldest_addr, None)
+                self.quic_udp_replies.pop(oldest_stream, None)
             stream_id = conn._quic.get_next_available_stream_id(False)
-            self.udpmap[addr] = stream_id
-            self.udpmap[stream_id] = reply
+            self.quic_udpmap[addr] = stream_id
+            self.quic_udp_replies[stream_id] = reply
             conn._quic._get_or_create_stream_for_send(stream_id)
         conn._quic.send_stream_data(stream_id, data, False)
         conn.transmit()
@@ -156,10 +169,11 @@ class ProxyH3(ProxyQUIC):
 
             def close(self):
                 if not self.closed:
+                    self.closed = True
                     conn.http.send_data(stream_id, b'', True)
                     conn.transmit()
                     conn.close_stream(stream_id)
-                self.closed = True
+                    conn.streams.pop(stream_id, None)
 
             def send_headers(self, headers):
                 conn.http.send_headers(stream_id, [(key.encode(), value.encode()) for key, value in headers])
@@ -182,8 +196,11 @@ class ProxyH3(ProxyQUIC):
             def quic_event_received(protocol, event):
                 if not server_side:
                     if isinstance(event, aioquic.quic.events.HandshakeCompleted):
-                        self.handshake.set_result(protocol)
+                        if self.handshake is not None and not self.handshake.done():
+                            self.handshake.set_result(protocol)
                     elif isinstance(event, aioquic.quic.events.ConnectionTerminated):
+                        if self.handshake is not None and not self.handshake.done():
+                            self.handshake.set_exception(ConnectionError('HTTP/3 handshake terminated'))
                         self.handshake = None
                         self.quic_egress_acm = None
                 if protocol.http is not None:
@@ -193,6 +210,8 @@ class ProxyH3(ProxyQUIC):
             def http_event_received(protocol, event):
                 if isinstance(event, aioquic.h3.events.HeadersReceived):
                     if event.stream_id not in protocol.streams and server_side:
+                        if len(protocol.streams) >= self.MAX_UDP_FLOWS:
+                            return
                         reader, writer = protocol.create_stream(event.stream_id)
                         writer.headers.set_result(event.headers)
                         self.task_registry.create_task(handler(reader, writer))
@@ -202,6 +221,7 @@ class ProxyH3(ProxyQUIC):
                         reader.feed_data(event.data)
                     if event.stream_ended:
                         reader.feed_eof()
+                        writer.close()
                     protocol.close_stream(event.stream_id)
 
             def create_stream(protocol, stream_id=None):
@@ -215,7 +235,7 @@ class ProxyH3(ProxyQUIC):
             def close_stream(protocol, stream_id):
                 if stream_id in protocol.streams:
                     reader, writer = protocol.streams[stream_id]
-                    if reader.at_eof() and writer.is_closing():
+                    if reader.at_eof() or writer.is_closing():
                         protocol.streams.pop(stream_id)
 
         return Protocol

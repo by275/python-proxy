@@ -3,6 +3,10 @@
 import os
 
 from . import transport
+from .errors import ProtocolError
+
+MAX_FRAME_SIZE = 16 * 1024 * 1024
+MAX_MESSAGE_SIZE = 16 * 1024 * 1024
 
 
 def xor_mask_bytes(data, mask_key):
@@ -14,21 +18,48 @@ def xor_mask_bytes(data, mask_key):
 
 
 class WebSocketStream:
-    """Adapt a byte stream to binary WebSocket messages."""
+    """Adapt a byte stream to bounded binary WebSocket messages."""
 
-    def __init__(self, reader, writer, masked=False):
+    def __init__(
+        self,
+        reader,
+        writer,
+        masked=False,
+        *,
+        expect_masked=False,
+        max_frame_size=MAX_FRAME_SIZE,
+        max_message_size=MAX_MESSAGE_SIZE,
+    ):
         self.reader = reader
         self.writer = writer
         self.masked = masked
+        self.expect_masked = expect_masked
+        self.max_frame_size = max_frame_size
+        self.max_message_size = max_message_size
         self.data_len = None
         self.mask_key = None
         self.opcode = None
+        self.fin = False
         self.buffer = bytearray()
+        self.message_opcode = None
+        self.message_buffer = bytearray()
         self.raw_write = writer.write
         self.on_message = reader.feed_data
+        self.closed = False
+
+    def _fail(self, message):
+        self.closed = True
+        close = getattr(self.writer, 'close', None)
+        if close is not None:
+            close()
+        raise ProtocolError(message)
 
     def write_frame(self, opcode, payload=b''):
         payload_length = len(payload)
+        if payload_length > self.max_frame_size:
+            raise ProtocolError('WebSocket frame exceeds configured limit')
+        if opcode >= 8 and (payload_length > 125 or opcode not in (8, 9, 10)):
+            raise ProtocolError('invalid WebSocket control frame')
         if payload_length < 126:
             second = bytes([(payload_length | 0x80) if self.masked else payload_length])
         elif payload_length < 65536:
@@ -41,41 +72,79 @@ class WebSocketStream:
             return self.raw_write(bytes([0x80 | opcode]) + second + mask_key + payload)
         return self.raw_write(bytes([0x80 | opcode]) + second + payload)
 
+    def _emit_message(self, payload):
+        if len(self.message_buffer) + len(payload) > self.max_message_size:
+            self._fail('WebSocket message exceeds configured limit')
+        self.message_buffer.extend(payload)
+        if self.fin:
+            message = bytes(self.message_buffer)
+            self.message_buffer.clear()
+            self.message_opcode = None
+            self.on_message(message)
+
+    def _handle_frame(self, payload):
+        if self.opcode == 0:
+            if self.message_opcode is None:
+                self._fail('unexpected WebSocket continuation frame')
+            self._emit_message(payload)
+        elif self.opcode in (1, 2):
+            if self.message_opcode is not None:
+                self._fail('new WebSocket data frame before continuation completed')
+            self.message_opcode = self.opcode
+            self._emit_message(payload)
+        elif self.opcode == 9:
+            self.write_frame(10, payload)
+        elif self.opcode == 8:
+            self.closed = True
+        elif self.opcode == 10:
+            return
+        else:
+            self._fail('unknown WebSocket opcode')
+
     def feed_data(self, data):
+        if self.closed:
+            return
         self.buffer.extend(data)
         while True:
             if self.data_len is None:
                 if len(self.buffer) < 2:
                     return
-                self.opcode = self.buffer[0] & 0x0f
-                required = 2 + (4 if self.buffer[1] & 128 else 0)
-                payload_marker = self.buffer[1] & 127
-                required += 2 if payload_marker == 126 else 8 if payload_marker == 127 else 0
-                if len(self.buffer) < required:
+                first, second = self.buffer[:2]
+                self.fin = bool(first & 0x80)
+                if first & 0x70:
+                    self._fail('reserved WebSocket bits are not supported')
+                self.opcode = first & 0x0f
+                is_masked = bool(second & 0x80)
+                if is_masked != self.expect_masked:
+                    self._fail('unexpected WebSocket masking state')
+                payload_marker = second & 0x7f
+                extension_size = 2 if payload_marker == 126 else 8 if payload_marker == 127 else 0
+                header_size = 2 + extension_size + (4 if is_masked else 0)
+                if len(self.buffer) < header_size:
                     return
-                self.data_len = (
-                    int.from_bytes(self.buffer[2:4], 'big')
-                    if payload_marker == 126
-                    else int.from_bytes(self.buffer[2:10], 'big')
-                    if payload_marker == 127
-                    else payload_marker
-                )
-                self.mask_key = self.buffer[required - 4:required] if self.buffer[1] & 128 else None
-                del self.buffer[:required]
-            else:
-                if len(self.buffer) < self.data_len:
-                    return
-                payload = self.buffer[:self.data_len]
-                if self.mask_key:
-                    payload = xor_mask_bytes(payload, self.mask_key)
-                del self.buffer[:self.data_len]
-                self.data_len = None
-                if self.opcode == 0x9:
-                    self.write_frame(0xA, payload)
-                elif self.opcode in (0x8, 0xA):
-                    pass
+                if payload_marker == 126:
+                    payload_length = int.from_bytes(self.buffer[2:4], 'big')
+                elif payload_marker == 127:
+                    payload_length = int.from_bytes(self.buffer[2:10], 'big')
+                    if payload_length & (1 << 63):
+                        self._fail('invalid WebSocket payload length')
                 else:
-                    self.on_message(payload)
+                    payload_length = payload_marker
+                if self.opcode >= 8 and (not self.fin or payload_length > 125):
+                    self._fail('invalid WebSocket control frame')
+                if payload_length > self.max_frame_size:
+                    self._fail('WebSocket frame exceeds configured limit')
+                self.mask_key = self.buffer[header_size - 4:header_size] if is_masked else None
+                self.data_len = payload_length
+                del self.buffer[:header_size]
+            if len(self.buffer) < self.data_len:
+                return
+            payload = self.buffer[:self.data_len]
+            if self.mask_key:
+                payload = xor_mask_bytes(payload, self.mask_key)
+            del self.buffer[:self.data_len]
+            self.data_len = None
+            self._handle_frame(payload)
 
     def attach(self):
         """Install the adapter on the existing asyncio stream pair."""
@@ -89,9 +158,9 @@ class WebSocketStream:
     def write(self, data):
         if not data:
             return
-        return self.write_frame(0x2, data)
+        return self.write_frame(2, data)
 
 
 def patch_stream(reader, writer, masked=False):
     """Install and return a :class:`WebSocketStream` adapter."""
-    return WebSocketStream(reader, writer, masked).attach()
+    return WebSocketStream(reader, writer, masked, expect_masked=not masked).attach()

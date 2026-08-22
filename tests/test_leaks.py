@@ -102,6 +102,44 @@ class UdpLeakSmokeTests(unittest.TestCase):
         self.assertNotIn(("127.0.0.1", 0), proxy.udpmap)
         self.assertEqual(len(proxy.udpmap), server.UDP_LIMIT)
 
+    def test_udp_connection_lost_removes_client_mapping_not_upstream_peer(self):
+        async def exercise():
+            proxy = server.ProxyDirect()
+            loop = asyncio.get_running_loop()
+            original = loop.create_datagram_endpoint
+
+            class DatagramTransport:
+                def sendto(self, data):
+                    return None
+
+                def close(self):
+                    return None
+
+            async def create_datagram_endpoint(factory, remote_addr):
+                protocol = factory()
+                protocol.connection_made(DatagramTransport())
+                protocol.datagram_received(b"upstream reply", ("198.51.100.10", 53))
+                protocol.connection_lost(None)
+                return protocol.transport, protocol
+
+            loop.create_datagram_endpoint = create_datagram_endpoint
+            try:
+                await proxy.udp_open_connection(
+                    "198.51.100.10",
+                    53,
+                    b"request",
+                    ("127.0.0.1", 40000),
+                    lambda data: None,
+                )
+            finally:
+                loop.create_datagram_endpoint = original
+
+            return proxy
+
+        proxy = asyncio.run(exercise())
+        self.assertEqual(proxy.udpmap, {})
+        self.assertEqual(proxy.connections, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
