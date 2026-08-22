@@ -7,6 +7,7 @@ import pproxy
 from pproxy import proto, server
 from pproxy.config import ProxyConfig
 from pproxy.errors import ProtocolError
+from pproxy.protocols import address as address_protocol
 from pproxy.protocols import http as http_protocol
 
 
@@ -54,6 +55,8 @@ class ParserContractTests(unittest.TestCase):
     def test_socks_address_round_trip(self):
         raw = io.BytesIO(socket.inet_aton("192.0.2.1") + (443).to_bytes(2, "big"))
         self.assertEqual(proto.socks_address(raw, 1), ("192.0.2.1", 443))
+        self.assertIs(proto.socks_address, address_protocol.socks_address)
+        self.assertIs(proto.socks_address_stream, address_protocol.socks_address_stream)
 
     def test_uri_jump_and_protocol_registry(self):
         self.assertEqual(
@@ -102,6 +105,16 @@ class AsyncProtocolContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(await proto.HTTP(None).guess(reader))
         self.assertEqual(await reader.read(4), b"GET ")
+
+    async def test_socks_address_stream_preserves_domain_wire_data(self):
+        reader = asyncio.StreamReader()
+        wire = b"\x0cexample.test" + (443).to_bytes(2, "big")
+        reader.feed_data(wire)
+
+        host, port, encoded = await proto.socks_address_stream(reader, 3)
+
+        self.assertEqual((host, port), ("example.test", 443))
+        self.assertEqual(encoded, wire)
 
 
 if __name__ == "__main__":

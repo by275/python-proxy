@@ -5,6 +5,7 @@ from . import transport
 from . import websocket
 from .errors import require
 from . import tls
+from .protocols import address as address_protocol
 from .protocols import http as http_protocol
 
 HTTP_LINE = http_protocol.HTTP_LINE
@@ -12,6 +13,8 @@ HTTP_METHOD_LINE = http_protocol.HTTP_METHOD_LINE
 _decode_header_value = http_protocol._decode_header_value
 parse_http_request_head = http_protocol.parse_http_request_head
 decode_http_header_block = http_protocol.decode_http_header_block
+socks_address_stream = address_protocol.socks_address_stream
+socks_address = address_protocol.socks_address
 packstr = lambda s, n=1: len(s).to_bytes(n, 'big') + s
 DRAIN_BUFFER_SIZE = 256 * 1024
 
@@ -32,29 +35,6 @@ def netloc_split(loc, default_host=None, default_port=None):
     else:
         host_name, port = loc, None
     return host_name or default_host, int(port) if port else default_port
-
-async def socks_address_stream(reader, n):
-    if n in (1, 17):
-        data = await transport.read_exactly(reader, 4)
-        host_name = socket.inet_ntoa(data)
-    elif n in (3, 19):
-        host_length = await transport.read_exactly(reader, 1)
-        host_data = await transport.read_exactly(reader, host_length[0])
-        data = host_length + host_data
-        host_name = host_data.decode()
-    elif n in (4, 20):
-        data = await transport.read_exactly(reader, 16)
-        host_name = socket.inet_ntop(socket.AF_INET6, data)
-    else:
-        raise Exception(f'Unknown address header {n}')
-    data_port = await transport.read_exactly(reader, 2)
-    return host_name, int.from_bytes(data_port, 'big'), data+data_port
-
-def socks_address(reader, n):
-    return socket.inet_ntoa(reader.read(4)) if n == 1 else \
-           reader.read(reader.read(1)[0]).decode() if n == 3 else \
-           socket.inet_ntop(socket.AF_INET6, reader.read(16)), \
-           int.from_bytes(reader.read(2), 'big')
 
 class BaseProtocol:
     def __init__(self, param):
