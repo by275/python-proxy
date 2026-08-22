@@ -11,7 +11,8 @@ dynamic = ["version"]
 description = "Proxy server that can tunnel among remote servers by regex rules."
 readme = "README.rst"
 requires-python = ">=3.12"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Qian Wenjie", email = "qianwenjie@gmail.com"},
 ]
@@ -35,7 +36,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Natural Language :: English",
     "Topic :: Software Development :: Build Tools",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
