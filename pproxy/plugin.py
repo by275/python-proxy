@@ -1,4 +1,6 @@
 import datetime, zlib, os, binascii, hmac, hashlib, time, random, collections
+from . import transport
+from .errors import require
 
 packstr = lambda s, n=2: len(s).to_bytes(n, 'big') + s
 toint = lambda s, o='big': int.from_bytes(s, o)
@@ -22,14 +24,14 @@ class Origin_Plugin(BasePlugin):
 
 class Http_Simple_Plugin(BasePlugin):
     async def init_client_data(self, reader, writer, cipher):
-        buf = await reader.read_until(b'\r\n\r\n')
+        buf = await transport.read_until(reader, b'\r\n\r\n')
         data = buf.split(b' ')[:2]
         data = bytes.fromhex(data[1][1:].replace(b'%',b'').decode())
-        reader._buffer[0:0] = data
+        transport.prepend(reader, data)
         writer.write(b'HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Encoding: gzip\r\nContent-Type: text/html\r\nDate: ' + datetime.datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT').encode() + b'\r\nServer: nginx\r\nVary: Accept-Encoding\r\n\r\n')
     async def init_server_data(self, reader, writer, cipher, raddr):
         writer.write(f'GET / HTTP/1.1\r\nHost: {raddr}\r\nUser-Agent: curl\r\nAccept-Encoding: gzip, deflate\r\nConnection: keep-alive\r\n\r\n'.encode())
-        await reader.read_until(b'\r\n\r\n')
+        await transport.read_until(reader, b'\r\n\r\n')
 
 TIMESTAMP_TOLERANCE = 5 * 60
 
@@ -37,17 +39,17 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
     CACHE = collections.deque(maxlen = 100)
     async def init_client_data(self, reader, writer, cipher):
         key = cipher.cipher(cipher.key).key
-        assert await reader.read_n(3) == b'\x16\x03\x01'
-        header = await reader.read_n(toint(await reader.read_n(2)))
-        assert header[:2] == b'\x01\x00'
-        assert header[4:6] == b'\x03\x03'
+        require(await transport.read_exactly(reader, 3) == b'\x16\x03\x01')
+        header = await transport.read_exactly(reader, toint(await transport.read_exactly(reader, 2)))
+        require(header[:2] == b'\x01\x00')
+        require(header[4:6] == b'\x03\x03')
         cacheid = header[6:28]
         sessionid = header[39:39+header[38]]
-        assert cacheid not in self.CACHE
+        require(cacheid not in self.CACHE)
         self.CACHE.append(cacheid)
         utc_time = int(time.time())
-        assert hmac.new(key+sessionid, cacheid, hashlib.sha1).digest()[:10] == header[28:38]
-        assert abs(toint(header[6:10]) - utc_time) < TIMESTAMP_TOLERANCE
+        require(hmac.new(key+sessionid, cacheid, hashlib.sha1).digest()[:10] == header[28:38])
+        require(abs(toint(header[6:10]) - utc_time) < TIMESTAMP_TOLERANCE)
         addhmac = lambda s: s + hmac.new(key+sessionid, s, hashlib.sha1).digest()[:10]
         writer.write(addhmac((b"\x16\x03\x03" + packstr(b"\x02\x00" + packstr(b'\x03\x03' + addhmac(utc_time.to_bytes(4, 'big') + os.urandom(18)) + b'\x20' + sessionid + b'\xc0\x2f\x00\x00\x05\xff\x01\x00\x01\x00')) + (b"\x16\x03\x03" + packstr(b"\x04\x00" + packstr(os.urandom(random.randrange(164)*2+64))) if random.randint(0, 8) < 1 else b'') + b"\x14\x03\x03\x00\x01\x01\x16\x03\x03" + packstr(os.urandom(random.choice((32, 40)))))[:-10]))
 
@@ -70,7 +72,7 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
                 if self.buf[:3] in (b'\x16\x03\x03', b'\x14\x03\x03'):
                     del self.buf[:5+l]
                     continue
-                assert self.buf[:3] == b'\x17\x03\x03'
+                require(self.buf[:3] == b'\x17\x03\x03')
                 data = self.buf[5:5+l]
                 ret += data
                 del self.buf[:5+l]
@@ -101,7 +103,7 @@ class Verify_Simple_Plugin(BasePlugin):
                     break
                 data = self.buf[2+self.buf[2]:l-4]
                 crc = (-1 - binascii.crc32(self.buf[:l-4])) & 0xffffffff
-                assert int.from_bytes(self.buf[l-4:l], 'little') == crc
+                require(int.from_bytes(self.buf[l-4:l], 'little') == crc)
                 ret += data
                 del self.buf[:l]
             return ret
@@ -155,4 +157,3 @@ def get_plugin(plugin_name):
     if plugin_name not in PLUGIN:
         return f'existing plugins: {sorted(PLUGIN.keys())}', None
     return None, PLUGIN[plugin_name]()
-

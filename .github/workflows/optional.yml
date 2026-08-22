@@ -1,0 +1,48 @@
+name: Optional backend checks
+
+on:
+  push:
+    branches:
+      - master
+      - modernize
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  imports:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: HTTP/2
+            extra: h2
+            module: h2
+          - name: SSH
+            extra: sshtunnel
+            module: asyncssh
+          - name: QUIC and HTTP/3
+            extra: quic
+            module: aioquic
+          - name: Accelerated crypto and event loop
+            extra: accelerated
+            module: Crypto
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the selected optional extra
+        run: python -m pip install ".[${{ matrix.extra }}]"
+
+      - name: Import the optional backend
+        run: python -c "import importlib; importlib.import_module('${{ matrix.module }}')"

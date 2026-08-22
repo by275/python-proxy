@@ -1,0 +1,78 @@
+import asyncio
+import unittest
+
+from pproxy import server
+from pproxy.observability import JsonFormatter, configure_logging
+from pproxy.runtime import TaskRegistry
+
+
+class BackwardLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_task_registry_cancels_and_waits_for_owned_tasks(self):
+        registry = TaskRegistry()
+        task = registry.create_task(asyncio.Event().wait())
+
+        registry.cancel_all()
+        await registry.wait_closed()
+
+        self.assertTrue(task.cancelled())
+        self.assertFalse(registry)
+
+    async def test_close_cancels_background_tasks(self):
+        backward = object.__new__(server.ProxyBackward)
+        backward.closed = False
+        backward.tasks = set()
+        backward.writers = set()
+
+        task = asyncio.create_task(asyncio.Event().wait())
+        backward.tasks.add(task)
+        backward.close()
+
+        await asyncio.sleep(0)
+        self.assertTrue(task.cancelled())
+        self.assertTrue(backward.closed)
+
+    async def test_backward_aclose_waits_for_legacy_task_sets(self):
+        backward = object.__new__(server.ProxyBackward)
+        backward.closed = False
+        backward.tasks = set()
+        backward.writers = set()
+
+        task = asyncio.create_task(asyncio.Event().wait())
+        backward.tasks.add(task)
+        await backward.aclose()
+
+        self.assertTrue(task.cancelled())
+        self.assertFalse(backward.tasks)
+
+    def test_udp_discard_releases_connection_accounting(self):
+        proxy = server.ProxyDirect()
+        addr = ("127.0.0.1", 53)
+        protocol = object()
+        proxy.connection_change(1)
+        proxy.udp_touch(addr, protocol)
+
+        self.assertIs(proxy.udp_discard(addr), protocol)
+        self.assertEqual(proxy.connections, 0)
+        self.assertNotIn(addr, proxy.udpmap)
+
+    def test_runtime_proxy_exposes_additive_shutdown_api(self):
+        proxy = server.ProxyDirect()
+        self.assertTrue(hasattr(proxy, 'wait_closed'))
+        self.assertTrue(hasattr(proxy, 'aclose'))
+
+    def test_structured_logging_is_opt_in(self):
+        import io
+        import json
+        import logging
+
+        stream = io.StringIO()
+        logger = configure_logging(logging.INFO, structured=True, stream=stream)
+        logger.info('contract check')
+        record = json.loads(stream.getvalue())
+
+        self.assertEqual(record['message'], 'contract check')
+        self.assertIsInstance(JsonFormatter(), logging.Formatter)
+
+
+if __name__ == "__main__":
+    unittest.main()

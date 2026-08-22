@@ -1,0 +1,28 @@
+# Changelog
+
+## Unreleased
+
+This modernization keeps the existing CLI, URI grammar, public factory names,
+and protocol wire formats compatible for Python 3.12+ Git installations.
+
+### Internal improvements
+
+- Split protocol parsing and implementations into `pproxy.protocols` while
+  keeping the `pproxy.proto` compatibility facade.
+- Added a protocol registry extension hook for future optional adapters such
+  as `cfp://`; CFP is not enabled by this branch.
+- Added `pproxy.runtime.TaskRegistry` and additive `wait_closed()`, `aclose()`,
+  and async context-manager support to runtime proxy objects. Existing
+  synchronous `close()` and `start_server(args)` calls remain valid.
+- Added opt-in JSON logging through `pproxy.observability`; legacy verbose
+  output is unchanged unless an application configures the new logger.
+- Preserved the existing optional dependency boundaries for H2, H3, QUIC,
+  SSH, accelerated ciphers, and daemon mode.
+
+### Verification
+
+- Core unittest contracts pass under normal and optimized (`python -O`)
+  interpreters.
+- Clean wheel builds include all protocol, transport, and runtime subpackages.
+- Dockerfile, `entrypoint.sh`, and `dev.txt` are intentionally outside this
+  modernization and are not part of the release commits.

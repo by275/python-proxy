@@ -1,6 +1,7 @@
 import hashlib, struct, base64
 
 from .cipher import BaseCipher, AEADCipher
+from .errors import require
 
 # Pure Python Ciphers
 
@@ -118,7 +119,7 @@ class ChaCha20_IETF_POLY1305_Cipher(AEADCipher):
     def process(self, s, tag=None):
         nonce = self.nonce
         if tag is not None:
-            assert tag == poly1305(self.cipher_encrypt, nonce, s)
+            require(tag == poly1305(self.cipher_encrypt, nonce, s))
         data = self.cipher_encrypt(nonce, s, counter=1)
         if tag is None:
             return data, poly1305(self.cipher_encrypt, nonce, data)
@@ -240,7 +241,7 @@ class GCMCipher(AEADCipher):
         z = int.from_bytes(self.nonce, 'big')<<32
         h = int.from_bytes(self.cipher.encrypt(z|1), 'big')
         if tag is not None:
-            assert (ghash(s)^h).to_bytes(self.TAG_LENGTH, 'big') == tag
+            require((ghash(s)^h).to_bytes(self.TAG_LENGTH, 'big') == tag)
         ret = bytes(s[i*16+j]^o for i in range((len(s)+15)//16) for j, o in enumerate(self.cipher.encrypt(z|(i+2)&((1<<32)-1))) if i*16+j < len(s))
         if tag is None:
             return ret, (ghash(ret)^h).to_bytes(self.TAG_LENGTH, 'big')
@@ -424,4 +425,3 @@ class RC2_CFB_Cipher(CFBCipher):
     CIPHER = RC2
 
 MAP = {cls.name(): cls for name, cls in globals().items() if name.endswith('_Cipher')}
-

@@ -1,21 +1,10 @@
 python-proxy
 ============
 
-|made-with-python| |PyPI-version| |Hit-Count| |Downloads| |Downloads-month| |Downloads-week|
+|made-with-python|
 
 .. |made-with-python| image:: https://img.shields.io/badge/Made%20with-Python-1f425f.svg
    :target: https://www.python.org/
-.. |PyPI-version| image:: https://badge.fury.io/py/pproxy.svg
-   :target: https://pypi.python.org/pypi/pproxy/
-.. |Hit-Count| image:: http://hits.dwyl.io/qwj/python-proxy.svg
-   :target: https://pypi.python.org/pypi/pproxy/
-.. |Downloads| image:: https://pepy.tech/badge/pproxy
-   :target: https://pepy.tech/project/pproxy
-.. |Downloads-month| image:: https://pepy.tech/badge/pproxy/month
-   :target: https://pepy.tech/project/pproxy
-.. |Downloads-week| image:: https://pepy.tech/badge/pproxy/week
-   :target: https://pepy.tech/project/pproxy
-
 HTTP/HTTP2/HTTP3/Socks4/Socks5/Shadowsocks/SSH/Redirect/Pf/QUIC TCP/UDP asynchronous tunnel proxy implemented in Python3 asyncio.
 
 QuickStart
@@ -23,8 +12,8 @@ QuickStart
 
 .. code:: rst
 
-  $ pip3 install pproxy
-  Successfully installed pproxy-1.9.5
+  $ python3 -m pip install "pproxy @ git+https://github.com/by275/python-proxy.git"
+  Successfully installed pproxy from Git
   $ pproxy
   Serving on :8080 by http,socks4,socks5
   ^C
@@ -35,8 +24,8 @@ Optional: (better performance with C ciphers)
 
 .. code:: rst
 
-  $ pip3 install pproxy[accelerated]
-  Successfully installed pycryptodome-3.6.4
+  $ python3 -m pip install "pproxy[accelerated] @ git+https://github.com/by275/python-proxy.git"
+  Successfully installed pycryptodome and uvloop
 
 Apply OS system-wide proxy: (MacOS, Windows)
 
@@ -166,6 +155,12 @@ pycryptodome_ is an optional library to enable faster (C version) cipher. **ppro
 
 asyncssh_ is an optional library to enable ssh tunnel client support.
 
+h2_ is an optional library to enable HTTP/2 support.
+
+aioquic_ is an optional library to enable HTTP/3 and QUIC support.
+
+python-daemon_ is an optional library for the ``--daemon`` mode.
+
 These are some performance benchmarks between Python and C ciphers (dataset: 8M):
 
 +---------------------+----------------+
@@ -181,10 +176,13 @@ PyPy3 Quickstart:
 .. code:: rst
 
   $ pypy3 -m ensurepip
-  $ pypy3 -m pip install asyncio pproxy
+  $ pypy3 -m pip install "pproxy @ git+https://github.com/by275/python-proxy.git"
 
 .. _pycryptodome: https://pycryptodome.readthedocs.io/en/latest/src/introduction.html
 .. _asyncssh: https://asyncssh.readthedocs.io/en/latest/
+.. _h2: https://python-hyper.org/projects/h2/en/stable/
+.. _aioquic: https://github.com/aiortc/aioquic
+.. _python-daemon: https://pypi.org/project/python-daemon/
 .. _PyPy: http://pypy.org
 
 Usage
@@ -194,13 +192,14 @@ Usage
 
   $ pproxy -h
   usage: pproxy [-h] [-l LISTEN] [-r RSERVER] [-ul ULISTEN] [-ur URSERVER]
-                [-b BLOCK] [-a ALIVED] [-v] [--ssl SSLFILE] [--pac PAC]
-                [--get GETS] [--sys] [--test TESTURL] [--version]
+                [-b BLOCK] [-a ALIVED] [-s {fa,rr,rc,lc}] [-d] [-v]
+                [--ssl SSLFILE] [--pac PAC] [--get GETS] [--auth AUTHTIME]
+                [--sys] [--reuse] [--daemon] [--test TEST] [--version]
 
   Proxy server that can tunnel among remote servers by regex rules. Supported
-  protocols: http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel
+  protocols include http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel
 
-  optional arguments:
+  options:
     -h, --help        show this help message and exit
     -l LISTEN         tcp server uri (default: http+socks4+socks5://:8080/)
     -r RSERVER        tcp remote server uri (default: direct)
@@ -209,15 +208,22 @@ Usage
     -b BLOCK          block regex rules
     -a ALIVED         interval to check remote alive (default: no check)
     -s {fa,rr,rc,lc}  scheduling algorithm (default: first_available)
+    -d                turn on debug to see tracebacks (default: no debug)
     -v                print verbose output
     --ssl SSLFILE     certfile[,keyfile] if server listen in ssl mode
     --pac PAC         http PAC path
     --get GETS        http custom {path,file}
+    --auth AUTHTIME   re-auth time interval for same ip (default: 86400*30)
     --sys             change system proxy setting (mac, windows)
+    --reuse           set SO_REUSEPORT (Linux only)
+    --daemon          run as a daemon (Linux only)
     --test TEST       test this url for all remote proxies and exit
     --version         show program's version number and exit
 
   Online help: <https://github.com/qwj/python-proxy>
+
+The ``cfp://`` Cloudflare Worker protocol is a planned compatibility target from
+the ``feat-cfp`` branch and is not enabled in this branch yet.
 
 URI Syntax
 ----------
@@ -759,4 +765,3 @@ Projects
 
 + `python-vpn <https://github.com/qwj/python-vpn>`_ - VPN Server (IPSec,IKE,IKEv2,L2TP,WireGuard) in pure python
 + `shadowproxy <https://github.com/guyingbo/shadowproxy>`_ - Awesome python proxy implementation by guyingbo
-
