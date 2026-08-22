@@ -1,7 +1,6 @@
 """SSH optional transport adapter."""
 
 import asyncio
-from asyncio import create_task
 
 from . import server as runtime
 
@@ -28,7 +27,7 @@ class ProxySSH(runtime.ProxySimple):
                 reader.feed_data(buf)
             reader.feed_eof()
 
-        create_task(channel())
+        self.task_registry.create_task(channel())
         remote_addr = ('ssh:' + str(host), port)
         writer.get_extra_info = {"peername": remote_addr, "sockname": remote_addr}.get
         return reader, writer

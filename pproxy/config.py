@@ -1,11 +1,17 @@
 """Typed internal configuration used when constructing proxy backends."""
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, fields
 from typing import Any
 
 
-def netloc_split(loc, default_host=None, default_port=None):
+def netloc_split(
+    loc: str,
+    default_host: str | None = None,
+    default_port: int | None = None,
+) -> tuple[str | None, int | None]:
     """Split a host:port netloc while preserving bracketed IPv6 syntax."""
     ipv6 = re.fullmatch(r'\[([0-9a-fA-F:]*)\](?::(\d+)?)?', loc)
     if ipv6:
@@ -34,6 +40,6 @@ class ProxyConfig:
     sslclient: Any
     sslserver: Any
 
-    def as_kwargs(self):
+    def as_kwargs(self) -> dict[str, Any]:
         """Return constructor arguments without exposing dataclass internals."""
         return {field.name: getattr(self, field.name) for field in fields(self)}

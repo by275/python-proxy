@@ -2,7 +2,6 @@
 
 import asyncio
 import functools
-from asyncio import create_task
 
 from . import server as runtime
 
@@ -102,7 +101,9 @@ class ProxyQUIC(runtime.ProxySimple):
                         protocol.transmit(),
                     )
                     event.get_extra_info = {}.get
-                    create_task(runtime.datagram_handler(event, event.data, addr, **vars(self), **args))
+                    self.task_registry.create_task(
+                        runtime.datagram_handler(event, event.data, addr, **vars(self), **args)
+                    )
                     return
                 super().quic_event_received(event)
 
@@ -118,7 +119,7 @@ class ProxyQUIC(runtime.ProxySimple):
 
         def handler(reader, writer):
             self.patch_writer(writer)
-            create_task(stream_handler(reader, writer, **vars(self), **args))
+            self.task_registry.create_task(stream_handler(reader, writer, **vars(self), **args))
 
         return aioquic.asyncio.serve(
             self.host_name,
@@ -194,7 +195,7 @@ class ProxyH3(ProxyQUIC):
                     if event.stream_id not in protocol.streams and server_side:
                         reader, writer = protocol.create_stream(event.stream_id)
                         writer.headers.set_result(event.headers)
-                        create_task(handler(reader, writer))
+                        self.task_registry.create_task(handler(reader, writer))
                 elif isinstance(event, aioquic.h3.events.DataReceived) and event.stream_id in protocol.streams:
                     reader, writer = protocol.streams[event.stream_id]
                     if event.data:

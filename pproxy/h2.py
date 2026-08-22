@@ -2,7 +2,6 @@
 
 import asyncio
 import functools
-from asyncio import create_task
 
 from . import proto
 from . import server as runtime
@@ -49,7 +48,7 @@ class ProxyH2(runtime.ProxySimple):
                     if event.stream_id not in streams:
                         stream_reader, stream_writer = self.get_stream(conn, writer, event.stream_id)
                         streams[event.stream_id] = (stream_reader, stream_writer)
-                        create_task(stream_handler(stream_reader, stream_writer))
+                        self.task_registry.create_task(stream_handler(stream_reader, stream_writer))
                     else:
                         stream_reader, stream_writer = streams[event.stream_id]
                     stream_writer.headers.set_result(event.headers)
@@ -133,7 +132,7 @@ class ProxyH2(runtime.ProxySimple):
             conn.send_data(stream_id, b'', end_stream=True)
             writer.write(conn.data_to_send())
 
-        create_task(write_job())
+        self.task_registry.create_task(write_job())
         return reader, stream_writer
 
     async def wait_h2_connection(self, local_addr, family):
@@ -143,7 +142,7 @@ class ProxyH2(runtime.ProxySimple):
         else:
             self.handshake = asyncio.get_running_loop().create_future()
             reader, writer = await super().wait_open_connection(None, None, local_addr, family)
-            create_task(self.handler(reader, writer))
+            self.task_registry.create_task(self.handler(reader, writer))
             await self.handshake
         return self.handshake.result()
 

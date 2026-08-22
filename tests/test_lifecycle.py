@@ -2,6 +2,7 @@ import asyncio
 import unittest
 
 from pproxy import server
+from pproxy.observability import JsonFormatter, configure_logging
 from pproxy.runtime import TaskRegistry
 
 
@@ -53,6 +54,24 @@ class BackwardLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(proxy.udp_discard(addr), protocol)
         self.assertEqual(proxy.connections, 0)
         self.assertNotIn(addr, proxy.udpmap)
+
+    def test_runtime_proxy_exposes_additive_shutdown_api(self):
+        proxy = server.ProxyDirect()
+        self.assertTrue(hasattr(proxy, 'wait_closed'))
+        self.assertTrue(hasattr(proxy, 'aclose'))
+
+    def test_structured_logging_is_opt_in(self):
+        import io
+        import json
+        import logging
+
+        stream = io.StringIO()
+        logger = configure_logging(logging.INFO, structured=True, stream=stream)
+        logger.info('contract check')
+        record = json.loads(stream.getvalue())
+
+        self.assertEqual(record['message'], 'contract check')
+        self.assertIsInstance(JsonFormatter(), logging.Formatter)
 
 
 if __name__ == "__main__":
