@@ -6,6 +6,8 @@ the cost it is intended to remove. It requires the development ``pyperf`` extra.
 """
 
 import asyncio
+import importlib.util
+import io
 import pathlib
 import sys
 import time
@@ -14,7 +16,11 @@ import pyperf
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+from pproxy import cipher as cipher_runtime
 from pproxy import server
+from pproxy import websocket as websocket_runtime
+from pproxy.cipher import PacketCipher
+from pproxy.cipherpy import MAP as pure_cipher_map
 from pproxy.protocols import http, socks, websocket
 from pproxy.runtime import TaskRegistry
 
@@ -147,6 +153,92 @@ def time_statistics_callbacks(loops):
     return time.perf_counter() - started
 
 
+def time_http_header_parsing(loops):
+    request = (
+        b"GET http://example.com/path?q=1 HTTP/1.1\r\n"
+        b"Host: example.com\r\n"
+        b"User-Agent: benchmark\r\n"
+        b"Accept: */*\r\n"
+        b"X-Trace-Id: abcdef\r\n\r\n"
+    )
+    started = time.perf_counter()
+    for _ in range(loops):
+        result = http.parse_http_request_head(request[:-4])
+        if result[4] != "example.com":
+            raise AssertionError("HTTP parser returned the wrong host")
+    return time.perf_counter() - started
+
+
+class MessageReader:
+    def __init__(self):
+        self.messages = 0
+
+    def feed_data(self, data):
+        self.messages += 1
+
+
+class MessageWriter:
+    def write(self, data):
+        return None
+
+
+def time_websocket_frame_parsing(loops):
+    reader = MessageReader()
+    stream = websocket_runtime.WebSocketStream(reader, MessageWriter())
+    payload = b"proxy websocket payload"
+    frame = bytes((0x82, len(payload))) + payload
+    started = time.perf_counter()
+    for _ in range(loops):
+        stream.feed_data(frame)
+    if reader.messages != loops:
+        raise AssertionError("WebSocket parser lost a message")
+    return time.perf_counter() - started
+
+
+def time_socks_address_parsing(loops):
+    address = b"\x0bexample.com" + (443).to_bytes(2, "big")
+    started = time.perf_counter()
+    for _ in range(loops):
+        host_name, port = socks.socks_address(io.BytesIO(address), 3)
+        if (host_name, port) != ("example.com", 443):
+            raise AssertionError("SOCKS address parser returned the wrong address")
+    return time.perf_counter() - started
+
+
+def time_udp_bookkeeping(loops):
+    proxy = server.ProxyDirect()
+    protocol = type("Protocol", (), {"transport": None})()
+    started = time.perf_counter()
+    for index in range(loops):
+        proxy.udp_touch(("127.0.0.1", index % 32), protocol)
+        proxy.udp_evict_if_needed()
+    return time.perf_counter() - started
+
+
+def time_pure_python_cipher_packet(loops):
+    cipher_class = pure_cipher_map["chacha20"]
+    packet_cipher = PacketCipher(cipher_class, b"benchmark-key", "chacha20")
+    payload = b"x" * 256
+    started = time.perf_counter()
+    for _ in range(loops):
+        if not packet_cipher.encrypt(payload):
+            raise AssertionError("cipher returned an empty packet")
+    return time.perf_counter() - started
+
+
+def time_accelerated_cipher_packet(loops):
+    cipher_class = cipher_runtime.MAP.get("chacha20")
+    if cipher_class is None:
+        return 0.0
+    packet_cipher = PacketCipher(cipher_class, b"benchmark-key", "chacha20")
+    payload = b"x" * 256
+    started = time.perf_counter()
+    for _ in range(loops):
+        if not packet_cipher.encrypt(payload):
+            raise AssertionError("cipher returned an empty packet")
+    return time.perf_counter() - started
+
+
 def main():
     runner = pyperf.Runner()
     runner.bench_time_func("connection_vars_kwargs", time_argument_expansion)
@@ -161,6 +253,13 @@ def main():
     runner.bench_time_func("task_registry_creation", time_registry_task_creation)
     runner.bench_time_func("task_group_creation", time_task_group)
     runner.bench_time_func("statistics_callbacks", time_statistics_callbacks)
+    runner.bench_time_func("http_header_parsing", time_http_header_parsing)
+    runner.bench_time_func("websocket_frame_parsing", time_websocket_frame_parsing)
+    runner.bench_time_func("socks_address_parsing", time_socks_address_parsing)
+    runner.bench_time_func("udp_bookkeeping", time_udp_bookkeeping)
+    runner.bench_time_func("pure_python_cipher_packet", time_pure_python_cipher_packet)
+    if importlib.util.find_spec("Crypto") and "chacha20" in cipher_runtime.MAP:
+        runner.bench_time_func("accelerated_cipher_packet", time_accelerated_cipher_packet)
 
 
 if __name__ == "__main__":
