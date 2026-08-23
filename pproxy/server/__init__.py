@@ -1,19 +1,19 @@
 import asyncio
 import argparse, base64, binascii, collections, contextlib, functools, random, re, socket, sys, time, urllib.parse
 from typing import Any, Callable
-from . import proto
-from . import admin
-from . import relay
-from .runtime import (
+from .. import proto
+from .. import admin
+from .. import relay
+from ..runtime import (
     DEFAULT_LISTENER_URI,
     TaskRegistry,
     UDP_LIMIT,
     UDP_TASK_LIMIT,
     is_unauthenticated_wildcard,
 )
-from . import transport
-from .config import ProxyConfig
-from .errors import (
+from .. import transport
+from ..config import ProxyConfig
+from ..errors import (
     BlockedConnection,
     ConfigurationError,
     ConnectionClosed,
@@ -22,7 +22,7 @@ from .errors import (
     require,
 )
 
-from .__doc__ import *
+from ..__doc__ import *
 
 SOCKET_TIMEOUT = transport.DEFAULT_TIMEOUT
 DUMMY = lambda s: s
@@ -703,14 +703,14 @@ def print_server_started(option, server, print_fn):
 
 def main(args=None):
     """Compatibility wrapper for the command-line application."""
-    from .app import main as app_main
+    from ..app import main as app_main
 
     return app_main(args)
 
 
-from .h2 import ProxyH2
-from .quic import ProxyH3, ProxyQUIC
-from .ssh import ProxySSH
+from ..h2 import ProxyH2
+from ..quic import ProxyH3, ProxyQUIC
+from ..ssh import ProxySSH
 
 
 if __name__ == '__main__':
