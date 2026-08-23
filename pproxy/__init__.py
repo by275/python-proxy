@@ -11,6 +11,7 @@ from .errors import (
     ConnectionClosed,
     ProtocolError,
     RequestError,
+    UpstreamError,
     UnsupportedProtocol,
 )
 
@@ -36,5 +37,6 @@ __all__ = [
     "RuleFactory",
     "Server",
     "RequestError",
+    "UpstreamError",
     "UnsupportedProtocol",
 ]

@@ -12,6 +12,10 @@ class ConfigurationError(ValueError):
     """Raised when a proxy URI or runtime option cannot be used."""
 
 
+class UpstreamError(ConnectionError):
+    """Raised when an upstream proxy or destination cannot be prepared."""
+
+
 class ProtocolError(AssertionError):
     """Raised when an input does not satisfy a protocol contract.
 

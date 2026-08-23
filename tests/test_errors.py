@@ -7,6 +7,7 @@ from pproxy.errors import (
     ConnectionClosed,
     ProtocolError,
     RequestError,
+    UpstreamError,
     UnsupportedProtocol,
     require,
 )
@@ -20,6 +21,7 @@ class ProtocolValidationTests(unittest.TestCase):
         self.assertIsInstance(UnsupportedProtocol(), ProtocolError)
         self.assertIsInstance(ConfigurationError(), ValueError)
         self.assertIsInstance(ConnectionClosed(), ConnectionError)
+        self.assertIsInstance(UpstreamError(), ConnectionError)
         self.assertEqual(str(ConnectionClosed()), 'Connection closed')
 
     def test_require_preserves_assertion_error_compatibility(self):

@@ -1,4 +1,5 @@
-import argparse, time, re, asyncio, functools, base64, random, urllib.parse, socket, sys, collections, contextlib
+import asyncio
+import argparse, base64, binascii, collections, contextlib, functools, random, re, socket, sys, time, urllib.parse
 from typing import Any, Callable
 from . import proto
 from . import admin
@@ -12,7 +13,14 @@ from .runtime import (
 )
 from . import transport
 from .config import ProxyConfig
-from .errors import require
+from .errors import (
+    BlockedConnection,
+    ConfigurationError,
+    ConnectionClosed,
+    ProtocolError,
+    UpstreamError,
+    require,
+)
 
 from .__doc__ import *
 
@@ -65,7 +73,7 @@ def schedule(rserver, salgorithm, host_name, port):
     elif salgorithm == 'lc':
         return min(filter(filter_cond, rserver), default=None, key=lambda i: i.connections)
     else:
-        raise Exception('Unknown scheduling algorithm') #Unreachable
+        raise ConfigurationError('Unknown scheduling algorithm')  # Unreachable
 
 async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, sslserver, debug=0, authtime=86400*30, block=None, salgorithm='fa', verbose=DUMMY, modstat=lambda u,r,h:lambda i:DUMMY, task_registry=None, **kwargs):
     remote_ip = 'unknown_remote_ip'
@@ -86,20 +94,20 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
         elif host_name == 'empty':
             await lproto.channel(reader, writer, None, DUMMY)
         elif block and block(host_name):
-            raise Exception('BLOCK ' + host_name)
+            raise BlockedConnection('BLOCK ' + host_name)
         else:
             roption = schedule(rserver, salgorithm, host_name, port) or DIRECT
             verbose(f'{lproto.name} {remote_text}{roption.logtext(host_name, port)}')
             try:
                 reader_remote, writer_remote = await roption.open_connection(host_name, port, local_addr, lbind)
-            except asyncio.TimeoutError:
-                raise Exception(f'Connection timeout {roption.bind}')
+            except asyncio.TimeoutError as exc:
+                raise UpstreamError(f'Connection timeout {roption.bind}') from exc
             try:
                 reader_remote, writer_remote = await roption.prepare_connection(reader_remote, writer_remote, host_name, port)
                 use_http = (await client_connected(writer_remote)) if client_connected else None
-            except Exception:
+            except (ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError, ProtocolError) as exc:
                 writer_remote.close()
-                raise Exception('Unknown remote protocol')
+                raise UpstreamError('Unknown remote protocol') from exc
             m = modstat(user, remote_ip, host_name)
             lchannel = lproto.http_channel if use_http else lproto.channel
             await relay_with_taskgroup(
@@ -108,15 +116,21 @@ async def stream_handler(reader, writer, unix, lbind, protos, rserver, cipher, s
             )
     except asyncio.CancelledError:
         raise
-    except Exception as ex:
-        if not isinstance(ex, asyncio.TimeoutError) and not str(ex).startswith('Connection closed'):
+    except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
+        if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
+        if debug:
+            raise
+    # Keep the service boundary alive for backend-specific unexpected errors.
+    except Exception as ex:
+        verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')
+        if debug:
+            raise
+    finally:
         try:
             writer.close()
         except (AttributeError, OSError):
             pass
-        if debug:
-            raise
 
 async def datagram_handler(writer, data, addr, protos, urserver, block, cipher, salgorithm, verbose=DUMMY, **kwargs):
     remote_ip = 'unknown_remote_ip'
@@ -130,7 +144,7 @@ async def datagram_handler(writer, data, addr, protos, urserver, block, cipher, 
         elif host_name == 'empty':
             pass
         elif block and block(host_name):
-            raise Exception('BLOCK ' + host_name)
+            raise BlockedConnection('BLOCK ' + host_name)
         else:
             roption = schedule(urserver, salgorithm, host_name, port) or DIRECT
             verbose(f'UDP {lproto.name} {remote_text}{roption.logtext(host_name, port)}')
@@ -141,9 +155,12 @@ async def datagram_handler(writer, data, addr, protos, urserver, block, cipher, 
             await roption.udp_open_connection(host_name, port, data, addr, reply)
     except asyncio.CancelledError:
         raise
-    except Exception as ex:
-        if not str(ex).startswith('Connection closed'):
+    except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
+        if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
+    # Keep the datagram service alive for backend-specific unexpected errors.
+    except Exception as ex:
+        verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')
 
 async def check_server_alive(interval, rserver, verbose):
     while True:
@@ -153,9 +170,9 @@ async def check_server_alive(interval, rserver, verbose):
                 continue
             try:
                 _, writer = await remote.open_connection(None, None, None, None, timeout=3)
-            except asyncio.CancelledError as ex:
+            except asyncio.CancelledError:
                 return
-            except Exception as ex:
+            except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
                 if remote.alive:
                     verbose(f'{remote.rproto.name} {remote.bind} -> OFFLINE')
                     remote.alive = False
@@ -286,6 +303,10 @@ class ProxyDirect(object):
         reader, writer = await self.open_connection(host, port, local_addr, lbind)
         try:
             reader, writer = await self.prepare_connection(reader, writer, host, port)
+        except asyncio.CancelledError:
+            writer.close()
+            raise
+        # Cleanup must run for backend-specific preparation failures too.
         except Exception:
             writer.close()
             raise
@@ -454,6 +475,7 @@ class ProxyBackward(ProxySimple):
         errwait = 0
         while not self.closed:
             wait = self.backward.open_connection(self.host_name, self.port, self.lbind, None)
+            writer = None
             try:
                 reader, writer = await asyncio.wait_for(wait, timeout=SOCKET_TIMEOUT)
                 if self.closed:
@@ -475,9 +497,10 @@ class ProxyBackward(ProxySimple):
                 errwait = 0
                 self.writers.discard(writer)
                 writer = None
-            except Exception as ex:
+            except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
                 try:
-                    writer.close()
+                    if writer is not None:
+                        writer.close()
                 except (AttributeError, OSError):
                     pass
                 if not self.closed:
@@ -491,7 +514,7 @@ class ProxyBackward(ProxySimple):
             if auth:
                 try:
                     require(auth == (await transport.read_exactly(reader, len(auth))))
-                except Exception:
+                except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
                     return
             await self.conn.put(
                 (reader, writer, self.tasks.create_task(self.watch_connection(reader, writer)))
@@ -550,7 +573,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
         try:
             import ssl, aioquic.quic.configuration
         except ImportError:
-            raise Exception('Missing library: "pip3 install aioquic"')
+            raise ConfigurationError('Missing library: "pip3 install aioquic"') from None
         quicserver = aioquic.quic.configuration.QuicConfiguration(is_client=False, max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT)
         quicclient = aioquic.quic.configuration.QuicConfiguration(max_stream_data=2**60, max_data=2**60, idle_timeout=SOCKET_TIMEOUT*5)
         quicclient.verify_mode = ssl.CERT_NONE if 'ssl' in rawprotos else ssl.CERT_REQUIRED
@@ -560,7 +583,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
         try:
             import h2
         except ImportError:
-            raise Exception('Missing library: "pip3 install h2"')
+            raise ConfigurationError('Missing library: "pip3 install h2"') from None
     urlpath, _, plugins = url.path.partition(',')
     urlpath, _, lbind = urlpath.partition('@')
     plugins = plugins.split(',') if plugins else None
@@ -570,7 +593,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
         if ':' not in cipher:
             try:
                 cipher = base64.b64decode(cipher).decode()
-            except Exception:
+            except (ValueError, UnicodeError, binascii.Error):
                 pass
             if ':' not in cipher:
                 raise argparse.ArgumentTypeError('userinfo must be "cipher:key"')
@@ -642,13 +665,13 @@ async def test_url(url, rserver):
         print(f'============ {roption.bind} ============')
         try:
             reader, writer = await roption.open_connection(host_name, port, None, None)
-        except asyncio.TimeoutError:
-            raise Exception(f'Connection timeout {rserver}')
+        except asyncio.TimeoutError as exc:
+            raise UpstreamError(f'Connection timeout {rserver}') from exc
         try:
             reader, writer = await roption.prepare_connection(reader, writer, host_name, port)
-        except Exception:
+        except (ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError, ProtocolError) as exc:
             writer.close()
-            raise Exception('Unknown remote protocol')
+            raise UpstreamError('Unknown remote protocol') from exc
         if url.scheme == 'https':
             import ssl
             sslclient = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
