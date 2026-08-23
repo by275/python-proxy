@@ -7,7 +7,7 @@ import urllib.parse
 
 from .. import admin, transport
 from ..config import netloc_split
-from ..errors import ProtocolError
+from ..errors import AuthenticationError, ConnectionClosed, ProtocolError, RequestError
 from ..runtime import HTTP_HEADER_LIMIT
 from .base import DRAIN_BUFFER_SIZE, BaseProtocol
 
@@ -129,8 +129,8 @@ class HTTP(BaseProtocol):
                             text,
                             True,
                         )
-                        raise Exception('Connection closed')
-            raise Exception(f'404 {method} {url.path}')
+                        raise ConnectionClosed()
+            raise RequestError(f'404 {method} {url.path}')
         if users:
             user = authtable.authed()
             if not user:
@@ -141,7 +141,7 @@ class HTTP(BaseProtocol):
                         f'{ver} 407 Proxy Authentication Required\r\nConnection: close\r\nProxy-Authenticate: Basic realm="simple"\r\n\r\n'.encode(),
                         wait=True,
                     )
-                    raise Exception('Unauthorized HTTP')
+                    raise AuthenticationError('Unauthorized HTTP')
             authtable.set_authed(user)
         if method == 'CONNECT':
             host_name, port = netloc_split(authority or path)
@@ -213,7 +213,7 @@ class HTTPOnly(HTTP):
                 host = host_name_pattern.search(b'\r\n' + request_head + b'\r\n')
                 if not header or not host:
                     writer_remote.close()
-                    raise Exception('Unknown HTTP header for protocol HTTPOnly')
+                    raise RequestError('Unknown HTTP header for protocol HTTPOnly')
                 method, path, ver = header.groups()
                 host_value = host.group(1)
                 data = (
@@ -299,26 +299,26 @@ class HTTPAdmin(HTTP):
                 'WWW-Authenticate: Basic realm="pproxy-admin"\r\n\r\n'.encode()
             )
             await drain_if_needed(writer, force=True)
-            raise Exception('Unauthorized HTTP admin')
+            raise AuthenticationError('Unauthorized HTTP admin')
 
         try:
             content_length = int(headers.get('Content-Length', '0'))
         except ValueError as exc:
-            raise Exception('Invalid Content-Length') from exc
+            raise RequestError('Invalid Content-Length') from exc
         if content_length < 0 or content_length > admin.MAX_ADMIN_BODY:
             await reply('413 Payload Too Large', f'{ver} 413 Payload Too Large\r\nConnection: close\r\n\r\n'.encode(), wait=True)
-            raise Exception('HTTP admin request body too large')
+            raise RequestError('HTTP admin request body too large')
         content = b''
         if content_length > 0:
             content = await transport.read_exactly(reader, content_length)
 
         url = urllib.parse.urlparse(path)
         if url.hostname is not None:
-            raise Exception('HTTP Admin Unsupported hostname')
+            raise RequestError('HTTP Admin Unsupported hostname')
         if method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
             for path, handler in admin.httpget.items():
                 if path == url.path:
                     await handler(reply=reply, ver=ver, method=method, headers=headers, lines=lines, content=content)
-                    raise Exception('Connection closed')
-            raise Exception(f'404 {method} {url.path}')
-        raise Exception(f'405 {method} not allowed')
+                    raise ConnectionClosed()
+            raise RequestError(f'404 {method} {url.path}')
+        raise RequestError(f'405 {method} not allowed')

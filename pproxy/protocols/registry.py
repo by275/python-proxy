@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .base import Direct
-from ..errors import ProtocolError
+from ..errors import ConnectionClosed, ProtocolError, UnsupportedProtocol
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
 from .transparent import Echo, Pf, Redir, SSH, Tunnel
@@ -108,14 +108,16 @@ async def accept(protos: Iterable[Any], reader: Any, **kw: Any) -> tuple[Any, ..
     for protocol in protos:
         try:
             user = await protocol.guess(reader, **kw)
-        except (ProtocolError, asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
-            raise ProtocolError('Connection closed') from exc
+        except ProtocolError:
+            raise
+        except (asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
+            raise ConnectionClosed() from exc
         if user:
             ret = await protocol.accept(reader, user, **kw)
             while len(ret) < 4:
                 ret += (None,)
             return (protocol,) + ret
-    raise Exception('Unsupported protocol')
+    raise UnsupportedProtocol('Unsupported protocol')
 
 
 def udp_accept(protos: Iterable[Any], data: bytes, **kw: Any) -> tuple[Any, ...]:
@@ -124,7 +126,7 @@ def udp_accept(protos: Iterable[Any], data: bytes, **kw: Any) -> tuple[Any, ...]
         ret = protocol.udp_accept(data, **kw)
         if ret:
             return (protocol,) + ret
-    raise Exception(f'Unsupported protocol {data[:10]}')
+    raise UnsupportedProtocol(f'Unsupported protocol {data[:10]}')
 
 
 def get_protos(rawprotos: Iterable[str]) -> tuple[str | None, list[Any] | None]:

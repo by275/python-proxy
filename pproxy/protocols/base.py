@@ -2,6 +2,8 @@
 
 import asyncio
 
+from ..errors import UnsupportedProtocol
+
 DRAIN_BUFFER_SIZE = 256 * 1024
 
 
@@ -17,10 +19,10 @@ class BaseProtocol:
         return False
 
     def udp_accept(self, data, **kw):
-        raise Exception(f'{self.name} don\'t support UDP server')
+        raise UnsupportedProtocol(f'{self.name} don\'t support UDP server')
 
     def udp_connect(self, rauth, host_name, port, data, **kw):
-        raise Exception(f'{self.name} don\'t support UDP client')
+        raise UnsupportedProtocol(f'{self.name} don\'t support UDP client')
 
     def udp_unpack(self, data):
         return data
@@ -29,7 +31,7 @@ class BaseProtocol:
         return data
 
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
-        raise Exception(f'{self.name} don\'t support client')
+        raise UnsupportedProtocol(f'{self.name} don\'t support client')
 
     async def channel(self, reader, writer, stat_bytes, stat_conn):
         try:

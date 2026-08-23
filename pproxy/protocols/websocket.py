@@ -7,6 +7,7 @@ import urllib.parse
 
 from .. import transport, websocket
 from ..config import netloc_split
+from ..errors import AuthenticationError, RequestError
 from .base import BaseProtocol
 from .http import MAX_HTTP_HEADER_SIZE, parse_http_request_head
 
@@ -37,12 +38,12 @@ class WS(BaseProtocol):
                         'Connection: close\r\n'
                         'Proxy-Authenticate: Basic realm="simple"\r\n\r\n'.encode()
                     )
-                    raise Exception('Unauthorized WebSocket')
+                    raise AuthenticationError('Unauthorized WebSocket')
             authtable.set_authed(user)
         if method != 'GET':
-            raise Exception(f'Unsupported method {method}')
+            raise RequestError(f'Unsupported method {method}')
         if sec_websocket_key is None:
-            raise Exception('Unsupported headers for WebSocket')
+            raise RequestError('Unsupported headers for WebSocket')
         seckey = base64.b64decode(sec_websocket_key)
         rseckey = base64.b64encode(hashlib.sha1(seckey + b'amtf').digest()[:16]).decode()
         writer.write(
