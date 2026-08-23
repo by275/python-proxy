@@ -34,3 +34,13 @@ def quic_prepare_stream(connection, stream_id):
 def quic_send_stream_data(connection, stream_id, data, end_stream=False):
     """Send stream data through the aioquic compatibility boundary."""
     return connection._quic.send_stream_data(stream_id, data, end_stream)
+
+
+def quic_is_closed(protocol):
+    """Return whether an aioquic protocol has completed its close event."""
+    return protocol._closed.is_set()
+
+
+def quic_force_closed(protocol):
+    """Mark an aioquic protocol closed after cancelling an unfinished handshake."""
+    protocol._closed.set()

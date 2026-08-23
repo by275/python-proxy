@@ -7,6 +7,8 @@ from . import server as runtime
 from .runtime import UDP_LIMIT
 from .transport.private import (
     quic_connection,
+    quic_force_closed,
+    quic_is_closed,
     quic_network_address,
     quic_next_stream_id,
     quic_prepare_stream,
@@ -25,6 +27,10 @@ class ProxyQUIC(runtime.ProxySimple):
         self.quicserver = quicserver
         self.quicclient = quicclient
         self.handshake = None
+        self.quic_egress_acm = None
+        self.quic_protocol = None
+        self._quic_connection_task = None
+        self._quic_waiters = 0
         self.quic_udpmap = {}
         self.quic_udp_replies = {}
 
@@ -41,51 +47,138 @@ class ProxyQUIC(runtime.ProxySimple):
         def close():
             nonlocal closed
             closed = True
+            self.writers.discard(writer)
             try:
                 writer.write_eof()
             except Exception:  # noqa: BLE001, S110 - preserve best-effort close
                 pass
 
         writer.close = close
+        self.writers.add(writer)
+
+    def _connection_terminated(self, handshake, message):
+        """Fail the active handshake and discard state for a dead QUIC path."""
+        if self.handshake is handshake:
+            if handshake is not None and not handshake.done():
+                handshake.set_exception(ConnectionError(message))
+            if handshake is not None and not handshake.cancelled():
+                handshake.exception()
+            self.handshake = None
+        self.quic_udpmap.clear()
+        self.quic_udp_replies.clear()
+
+    async def _run_quic_connection(self, create_protocol, handshake):
+        import aioquic.asyncio
+
+        context = aioquic.asyncio.connect(
+            self.host_name,
+            self.port,
+            create_protocol=create_protocol,
+            configuration=self.quicclient,
+            wait_connected=False,
+        )
+        self.quic_egress_acm = context
+        protocol = None
+        entered = False
+        try:
+            protocol = await context.__aenter__()
+            entered = True
+            self.quic_protocol = protocol
+            protocol.transmit()
+            await protocol.wait_connected()
+            if not handshake.done():
+                handshake.set_result(protocol)
+            await protocol.wait_closed()
+        except asyncio.CancelledError:
+            if protocol is not None:
+                protocol.close()
+                quic_force_closed(protocol)
+            if not handshake.done():
+                handshake.cancel()
+            raise
+        except Exception as exc:  # noqa: BLE001 - publish adapter failures to waiters
+            if not handshake.done():
+                handshake.set_exception(exc)
+            if not handshake.cancelled():
+                handshake.exception()
+        finally:
+            if self.quic_protocol is protocol:
+                self.quic_protocol = None
+            if self.quic_egress_acm is context:
+                self.quic_egress_acm = None
+            if entered:
+                await context.__aexit__(None, None, None)
+            if self.handshake is handshake:
+                self.handshake = None
+            if self._quic_connection_task is asyncio.current_task():
+                self._quic_connection_task = None
+            self.quic_udpmap.clear()
+            self.quic_udp_replies.clear()
+
+    async def _wait_for_quic_connection(self, protocol_factory):
+        """Return a live protocol, owning one async QUIC context per proxy."""
+        while True:
+            handshake = self.handshake
+            if handshake is None:
+                closing = self._quic_connection_task
+                if closing is not None and not closing.done():
+                    await asyncio.shield(closing)
+                    continue
+                handshake = asyncio.get_running_loop().create_future()
+                self.handshake = handshake
+                self._quic_connection_task = self.task_registry.create_task(
+                    self._run_quic_connection(protocol_factory(handshake), handshake),
+                    name='quic-connection',
+                )
+            if handshake.done():
+                protocol = handshake.result()
+                if not quic_is_closed(protocol):
+                    return protocol
+                if self.handshake is handshake:
+                    self.handshake = None
+                continue
+            self._quic_waiters += 1
+            try:
+                return await asyncio.shield(handshake)
+            except asyncio.CancelledError:
+                if (
+                    self.handshake is handshake
+                    and not handshake.done()
+                    and self._quic_waiters == 1
+                    and self._quic_connection_task is not None
+                ):
+                    self._quic_connection_task.cancel()
+                raise
+            finally:
+                self._quic_waiters -= 1
+
+    def close(self):
+        super().close()
+        if self.quic_protocol is not None:
+            self.quic_protocol.close()
+        elif self._quic_connection_task is not None:
+            self._quic_connection_task.cancel()
 
     async def wait_quic_connection(self):
-        if self.handshake is not None:
-            if not self.handshake.done():
-                await self.handshake
-        else:
-            self.handshake = asyncio.get_running_loop().create_future()
-            import aioquic.asyncio
-            import aioquic.quic.events
+        import aioquic.asyncio
+        import aioquic.quic.events
 
+        def protocol_factory(handshake):
             class Protocol(aioquic.asyncio.QuicConnectionProtocol):
                 def quic_event_received(protocol, event):
-                    if isinstance(event, aioquic.quic.events.HandshakeCompleted):
-                        if self.handshake is not None and not self.handshake.done():
-                            self.handshake.set_result(protocol)
-                    elif isinstance(event, aioquic.quic.events.ConnectionTerminated):
-                        if self.handshake is not None and not self.handshake.done():
-                            self.handshake.set_exception(ConnectionError('QUIC handshake terminated'))
-                        self.handshake = None
-                        self.quic_egress_acm = None
-                        self.quic_udpmap.clear()
-                        self.quic_udp_replies.clear()
+                    if isinstance(event, aioquic.quic.events.ConnectionTerminated):
+                        self._connection_terminated(handshake, 'QUIC connection terminated')
                     elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in self.quic_udp_replies:
                         self.quic_udp_replies[event.stream_id](self.udp_packet_unpack(event.data))
                         return
                     super().quic_event_received(event)
 
-            self.quic_egress_acm = aioquic.asyncio.connect(
-                self.host_name,
-                self.port,
-                create_protocol=Protocol,
-                configuration=self.quicclient,
-            )
-            await self.quic_egress_acm.__aenter__()
-            await self.handshake
+            return Protocol
+
+        return await self._wait_for_quic_connection(protocol_factory)
 
     async def udp_open_connection(self, host, port, data, addr, reply):
-        await self.wait_quic_connection()
-        conn = self.handshake.result()
+        conn = await self.wait_quic_connection()
         if addr in self.quic_udpmap:
             stream_id = self.quic_udpmap[addr]
         else:
@@ -101,8 +194,7 @@ class ProxyQUIC(runtime.ProxySimple):
         conn.transmit()
 
     async def wait_open_connection(self, *args):
-        await self.wait_quic_connection()
-        conn = self.handshake.result()
+        conn = await self.wait_quic_connection()
         stream_id = quic_next_stream_id(conn, False)
         quic_prepare_stream(conn, stream_id)
         reader, writer = conn._create_stream(stream_id)
@@ -155,6 +247,9 @@ class ProxyH3(ProxyQUIC):
     """Proxy backend for HTTP/3 streams using the optional ``aioquic`` package."""
 
     def get_stream(self, conn, stream_id):
+        from aioquic.h3.connection import FrameUnexpected
+
+        owner = self
         remote_addr = quic_network_address(conn)
         reader = asyncio.StreamReader()
 
@@ -167,11 +262,14 @@ class ProxyH3(ProxyQUIC):
                 return {"peername": remote_addr, "sockname": remote_addr}.get(key)
 
             def write(self, data):
+                if self.closed or quic_is_closed(conn):
+                    return
                 conn.http.send_data(stream_id, data, False)
                 conn.transmit()
 
             async def drain(self):
-                conn.transmit()
+                if not self.closed and not quic_is_closed(conn):
+                    conn.transmit()
 
             def is_closing(self):
                 return self.closed
@@ -179,18 +277,27 @@ class ProxyH3(ProxyQUIC):
             def close(self):
                 if not self.closed:
                     self.closed = True
-                    conn.http.send_data(stream_id, b'', True)
-                    conn.transmit()
+                    owner.writers.discard(self)
+                    if not quic_is_closed(conn):
+                        try:
+                            conn.http.send_data(stream_id, b'', True)
+                            conn.transmit()
+                        except FrameUnexpected:
+                            pass
                     conn.close_stream(stream_id)
                     conn.streams.pop(stream_id, None)
 
             def send_headers(self, headers):
+                if self.closed or quic_is_closed(conn):
+                    return
                 conn.http.send_headers(stream_id, [(key.encode(), value.encode()) for key, value in headers])
                 conn.transmit()
 
-        return reader, StreamWriter()
+        writer = StreamWriter()
+        self.writers.add(writer)
+        return reader, writer
 
-    def get_protocol(self, server_side=False, handler=None):
+    def get_protocol(self, server_side=False, handler=None, handshake=None):
         import aioquic.asyncio
         import aioquic.h3.connection
         import aioquic.h3.events
@@ -203,15 +310,14 @@ class ProxyH3(ProxyQUIC):
                 protocol.streams = {}
 
             def quic_event_received(protocol, event):
-                if not server_side:
-                    if isinstance(event, aioquic.quic.events.HandshakeCompleted):
-                        if self.handshake is not None and not self.handshake.done():
-                            self.handshake.set_result(protocol)
-                    elif isinstance(event, aioquic.quic.events.ConnectionTerminated):
-                        if self.handshake is not None and not self.handshake.done():
-                            self.handshake.set_exception(ConnectionError('HTTP/3 handshake terminated'))
-                        self.handshake = None
-                        self.quic_egress_acm = None
+                if isinstance(event, aioquic.quic.events.ConnectionTerminated):
+                    if not server_side:
+                        self._connection_terminated(handshake, 'HTTP/3 connection terminated')
+                    for reader, writer in tuple(protocol.streams.values()):
+                        reader.feed_eof()
+                        writer.close()
+                    protocol.streams.clear()
+                    return
                 if protocol.http is not None:
                     for http_event in protocol.http.handle_event(event):
                         protocol.http_event_received(http_event)
@@ -223,7 +329,14 @@ class ProxyH3(ProxyQUIC):
                             return
                         reader, writer = protocol.create_stream(event.stream_id)
                         writer.headers.set_result(event.headers)
-                        self.task_registry.create_task(handler(reader, writer))
+
+                        async def handle_stream():
+                            try:
+                                await handler(reader, writer)
+                            finally:
+                                writer.close()
+
+                        self.task_registry.create_task(handle_stream(), name='h3-stream')
                 elif isinstance(event, aioquic.h3.events.DataReceived) and event.stream_id in protocol.streams:
                     reader, writer = protocol.streams[event.stream_id]
                     if event.data:
@@ -250,25 +363,12 @@ class ProxyH3(ProxyQUIC):
         return Protocol
 
     async def wait_h3_connection(self):
-        if self.handshake is not None:
-            if not self.handshake.done():
-                await self.handshake
-        else:
-            import aioquic.asyncio
-
-            self.handshake = asyncio.get_running_loop().create_future()
-            self.quic_egress_acm = aioquic.asyncio.connect(
-                self.host_name,
-                self.port,
-                create_protocol=self.get_protocol(),
-                configuration=self.quicclient,
-            )
-            await self.quic_egress_acm.__aenter__()
-            await self.handshake
+        return await self._wait_for_quic_connection(
+            lambda future: self.get_protocol(handshake=future),
+        )
 
     async def wait_open_connection(self, *args):
-        await self.wait_h3_connection()
-        return self.handshake.result().create_stream()
+        return (await self.wait_h3_connection()).create_stream()
 
     def start_server(self, args, stream_handler=runtime.stream_handler):
         import aioquic.asyncio

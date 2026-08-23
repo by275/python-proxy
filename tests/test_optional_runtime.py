@@ -1,9 +1,14 @@
 """Runtime checks for optional transport security and lifecycle policy."""
 
 import asyncio
+import contextlib
 import importlib.util
+import socket
 import ssl
+import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
+from ipaddress import ip_address
 from unittest.mock import AsyncMock, patch
 
 from pproxy import server
@@ -94,6 +99,160 @@ class H2LoopbackTests(unittest.IsolatedAsyncioTestCase):
             await listener.wait_closed()
             await handler.wait_closed()
             await echo_server.wait_closed()
+
+
+def _write_quic_certificate(directory):
+    """Create a short-lived localhost certificate for an aioquic fixture."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, '127.0.0.1')])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(minutes=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ip_address('127.0.0.1'))]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = f'{directory}/certificate.pem'
+    key_path = f'{directory}/key.pem'
+    certificate_data = certificate.public_bytes(serialization.Encoding.PEM)
+    with open(cert_path, 'wb') as cert_file:
+        cert_file.write(certificate_data)
+    with open(key_path, 'wb') as key_file:
+        key_file.write(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.TraditionalOpenSSL,
+                serialization.NoEncryption(),
+            )
+        )
+    return cert_path, key_path, certificate_data
+
+
+@contextlib.asynccontextmanager
+async def quic_fixture(protocol_name):
+    async def echo(reader, writer):
+        try:
+            while data := await reader.read(65536):
+                writer.write(data)
+                await writer.drain()
+        finally:
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+
+    with tempfile.TemporaryDirectory() as directory:
+        cert_path, key_path, certificate_data = _write_quic_certificate(directory)
+        echo_server = await asyncio.start_server(echo, '127.0.0.1', 0)
+        echo_port = echo_server.sockets[0].getsockname()[1]
+        listener = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:0')
+        listener.quicserver.load_cert_chain(cert_path, key_path)
+        handler = await listener.start_server({'rserver': [], 'verbose': lambda *_: None})
+        proxy_port = handler._transport.get_extra_info('sockname')[1]
+        client = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:{proxy_port}')
+        client.quicclient.load_verify_locations(cadata=certificate_data)
+        try:
+            yield client, listener, handler, echo_server, echo_port
+        finally:
+            client.close()
+            listener.close()
+            handler.close()
+            echo_server.close()
+            await asyncio.sleep(0.1)
+            await client.wait_closed()
+            await listener.wait_closed()
+            await echo_server.wait_closed()
+
+
+class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skipUnless(importlib.util.find_spec('aioquic'), 'aioquic is not installed')
+    async def test_quic_and_h3_round_trip_and_shutdown(self):
+        for protocol_name in ('quic', 'h3'):
+            with self.subTest(protocol=protocol_name):
+                async with quic_fixture(protocol_name) as (client, _listener, _handler, _echo, echo_port):
+                    for index in range(3):
+                        reader, writer = await asyncio.wait_for(
+                            client.tcp_connect('127.0.0.1', echo_port),
+                            5,
+                        )
+                        payload = f'{protocol_name}-smoke-{index}'.encode()
+                        writer.write(payload)
+                        await writer.drain()
+                        self.assertEqual(
+                            await asyncio.wait_for(reader.readexactly(len(payload)), 5),
+                            payload,
+                        )
+                        writer.close()
+                        await asyncio.sleep(0.02)
+                    self.assertFalse(client.writers)
+
+    @unittest.skipUnless(importlib.util.find_spec('aioquic'), 'aioquic is not installed')
+    async def test_reconnects_after_remote_quic_connection_termination(self):
+        for protocol_name in ('quic', 'h3'):
+            with self.subTest(protocol=protocol_name):
+                async with quic_fixture(protocol_name) as (client, listener, handler, _echo, echo_port):
+                    reader, writer = await asyncio.wait_for(
+                        client.tcp_connect('127.0.0.1', echo_port),
+                        5,
+                    )
+                    writer.write(b'first-connection')
+                    await writer.drain()
+                    self.assertEqual(
+                        await asyncio.wait_for(reader.readexactly(16), 5),
+                        b'first-connection',
+                    )
+                    writer.close()
+                    remote_protocol = next(iter(handler._protocols.values()))
+                    remote_protocol.close()
+                    await asyncio.wait_for(client.wait_closed(), 1)
+                    handler.close()
+
+                    replacement = await listener.start_server(
+                        {'rserver': [], 'verbose': lambda *_: None}
+                    )
+                    client.port = replacement._transport.get_extra_info('sockname')[1]
+                    try:
+                        reader, writer = await asyncio.wait_for(
+                            client.tcp_connect('127.0.0.1', echo_port),
+                            5,
+                        )
+                        writer.write(b'reconnected')
+                        await writer.drain()
+                        self.assertEqual(
+                            await asyncio.wait_for(reader.readexactly(11), 5),
+                            b'reconnected',
+                        )
+                        writer.close()
+                    finally:
+                        replacement.close()
+
+    @unittest.skipUnless(importlib.util.find_spec('aioquic'), 'aioquic is not installed')
+    async def test_cancelled_handshake_does_not_leave_connection_task(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind(('127.0.0.1', 0))
+            unused_port = probe.getsockname()[1]
+        client = server.proxies_by_uri(f'quic+http://127.0.0.1:{unused_port}')
+        try:
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(client.wait_quic_connection(), 0.1)
+            await client.wait_closed()
+            self.assertIsNone(client.quic_protocol)
+            self.assertIsNone(client.handshake)
+            self.assertFalse(client.task_registry)
+        finally:
+            client.close()
+            await client.wait_closed()
 
 
 if __name__ == "__main__":
