@@ -14,6 +14,10 @@ from pproxy.protocols import registry as registry_protocol
 from pproxy.protocols import socks as socks_protocol
 from pproxy.protocols import transparent as transparent_protocol
 from pproxy.protocols import websocket as websocket_protocol
+from pproxy.server import connections as server_connections
+from pproxy.server import diagnostics as server_diagnostics
+from pproxy.server import factory as server_factory
+from pproxy.server import handlers as server_handlers
 
 
 class ParserContractTests(unittest.TestCase):
@@ -90,6 +94,13 @@ class ParserContractTests(unittest.TestCase):
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_server_facade_reexports_structured_components(self):
+        self.assertIs(server.ProxyDirect, server_connections.ProxyDirect)
+        self.assertIs(server.ProxySimple, server_connections.ProxySimple)
+        self.assertIs(server.stream_handler, server_handlers.stream_handler)
+        self.assertIs(server.proxies_by_uri, server_factory.proxies_by_uri)
+        self.assertIs(server.print_server_started, server_diagnostics.print_server_started)
+
     def test_additive_public_contracts_are_exported(self):
         self.assertIs(pproxy.ProxyConfig, ProxyConfig)
         self.assertIs(pproxy.ProtocolError, ProtocolError)
