@@ -201,7 +201,7 @@ Usage
 
   options:
     -h, --help        show this help message and exit
-    -l LISTEN         tcp server uri (default: http+socks4+socks5://:8080/)
+    -l LISTEN         tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)
     -r RSERVER        tcp remote server uri (default: direct)
     -ul ULISTEN       udp server setting uri (default: none)
     -ur URSERVER      udp remote server uri (default: direct)
@@ -350,6 +350,8 @@ URI Syntax
     +-----------------+------------+-----------+-------------+
 
   - *pproxy* ciphers have pure python implementations. Program will switch to C cipher if there is C implementation available within pycryptodome_. Otherwise, use pure python cipher.
+
+  - RC4, RC4-MD5, Blowfish-CFB, CAST5-CFB, and DES-CFB are retained for wire compatibility only. Selecting one emits a warning; new deployments should prefer an AEAD cipher such as chacha20-ietf-poly1305 or aes-256-gcm.
 
   - AEAD ciphers use additional payload after each packet. The underlying protocol is different. Specifications: AEAD_.
 
@@ -694,7 +696,7 @@ Examples
 
     $ pproxy -l http://:8080 -r ssh://remote_server.com/#login::private_key_path
 
-  SSH connection known_hosts feature is disabled by default.
+  SSH server host-key verification uses AsyncSSH's known_hosts configuration by default. For controlled compatibility tests only, add the explicit ``insecure`` URI modifier (for example, ``ssh+insecure://``).
 
 - SSH jump
 

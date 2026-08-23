@@ -42,7 +42,6 @@ class WebSocketFrameTests(unittest.TestCase):
         frame = b"\x81" + bytes([0x80 | len(payload)]) + mask + proto.xor_mask_bytes(payload, mask)
         reader.feed_data(frame[:3])
         reader.feed_data(frame[3:])
-        reader.feed_data(b"ignored")
 
         self.assertEqual(received, [payload])
         writer.write(b"reply")
@@ -53,7 +52,8 @@ class WebSocketFrameTests(unittest.TestCase):
         writer = CaptureWriter()
         proto.WS(None).patch_ws_stream(reader, writer)
 
-        reader.feed_data(b"\x89\x04ping")
+        mask = b"abcd"
+        reader.feed_data(b"\x89\x84" + mask + proto.xor_mask_bytes(b"ping", mask))
         self.assertEqual(writer.writes, [b"\x8a\x04ping"])
 
         payload = b"x" * 126

@@ -307,7 +307,7 @@ class Blowfish(RAW):
             buf = self.encrypt(buf)
             self.p[i:i+2] = struct.unpack('>II', buf)
     def encrypt(self, s):
-        s = data.to_bytes(8, 'big') if isinstance(s, int) else s
+        s = s.to_bytes(8, 'big') if isinstance(s, int) else s
         sl, sr = struct.unpack('>II', s)
         sl ^= self.p[0]
         for i in self.p[1:17]:
@@ -361,7 +361,7 @@ class IDEA(RAW):
             e.append((e[i-8&0xf8|i+1&0x7]&0x7f)<<9|e[i-8&0xf8|i+2&0x7]>>7)
         self.e = [e[i*6:i*6+6] for i in range(9)]
     def encrypt(self, s):
-        s = data.to_bytes(8, 'big') if isinstance(s, int) else s
+        s = s.to_bytes(8, 'big') if isinstance(s, int) else s
         M = lambda a,b: (a*b-(a*b>>16)+(a*b&0xffff<a*b>>16) if a else 1-b if b else 1-a)&0xffff
         s0, s1, s2, s3 = struct.unpack('>4H', s)
         for e in self.e[:-1]:
@@ -387,7 +387,7 @@ class SEED(RAW):
             self.e.append((self.G((key0>>32)+(key1>>32)-kc), self.G(key0-key1+kc)))
             key0, key1 = (key0, (key1<<8|key1>>56)&(1<<64)-1) if i&1 else ((key0<<56|key0>>8)&(1<<64)-1, key1)
     def encrypt(self, s):
-        s = data.to_bytes(16, 'big') if isinstance(s, int) else s
+        s = s.to_bytes(16, 'big') if isinstance(s, int) else s
         s0, s1, s2, s3 = struct.unpack('>4I', s)
         for k0, k1 in self.e:
             t0 = self.G(s2^k0^s3^k1)
@@ -413,7 +413,7 @@ class RC2(RAW):
             e[i] = self.S[e[i+1]^e[i+len(key)]]
         self.e = struct.unpack('<64H', e)
     def encrypt(self, s):
-        s = data.to_bytes(8, 'big') if isinstance(s, int) else s
+        s = s.to_bytes(8, 'big') if isinstance(s, int) else s
         s = list(struct.unpack('<4H', s))
         for j in self.B:
             s[j&3] = s[j&3]+self.e[j]+(s[j+3&3]&s[j+2&3])+(~s[j+3&3]&s[j+1&3])<<j%4*4//3+1&0xffff|(s[j&3]+self.e[j]+(s[j+3&3]&s[j+2&3])+(~s[j+3&3]&s[j+1&3])&0xffff)>>15-j%4*4//3 if j>=0 else s[j]+self.e[s[j+3]&0x3f]

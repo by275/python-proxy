@@ -7,7 +7,7 @@ import io
 import socket
 
 from .. import transport
-from ..errors import require
+from ..errors import AuthenticationError, ConnectionClosed, require
 from .address import socks_address, socks_address_stream
 from .base import BaseProtocol
 
@@ -30,7 +30,7 @@ class Trojan(BaseProtocol):
     async def accept(self, reader, user, **kw):
         require(await transport.read_exactly(reader, 2) == b'\x0d\x0a')
         if (await transport.read_exactly(reader, 1))[0] != 1:
-            raise Exception('Connection closed')
+            raise ConnectionClosed()
         host_name, port, _ = await socks_address_stream(
             reader,
             (await transport.read_exactly(reader, 1))[0],
@@ -172,7 +172,7 @@ class SS(SSR):
     def udp_pack(self, host_name, port, data):
         try:
             return b'\x01' + socket.inet_aton(host_name) + port.to_bytes(2, 'big') + data
-        except Exception:
+        except (OSError, ValueError, OverflowError):
             pass
         return b'\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big') + data
 
@@ -197,7 +197,7 @@ class Socks4(BaseProtocol):
             if userid in users:
                 user = userid
             elif not user:
-                raise Exception(f'Unauthorized SOCKS {userid}')
+                raise AuthenticationError(f'Unauthorized SOCKS {userid}')
             authtable.set_authed(user)
         writer.write(b'\x00\x5a' + port.to_bytes(2, 'big') + ip)
         return user, socket.inet_ntoa(ip), port
@@ -222,17 +222,17 @@ class Socks5(BaseProtocol):
         user = authtable.authed()
         if users and (not user or b'\x00' not in methods):
             if b'\x02' not in methods:
-                raise Exception('Unauthorized SOCKS')
+                raise AuthenticationError('Unauthorized SOCKS')
             writer.write(b'\x05\x02')
             require((await transport.read_exactly(reader, 1))[0] == 1, 'Unknown SOCKS auth')
             u = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             p = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             user = u + b':' + p
             if user not in users:
-                raise Exception(f'Unauthorized SOCKS {u}:{p}')
+                raise AuthenticationError(f'Unauthorized SOCKS {u}:{p}')
             writer.write(b'\x01\x00')
         elif users and not user:
-            raise Exception('Unauthorized SOCKS')
+            raise AuthenticationError('Unauthorized SOCKS')
         else:
             writer.write(b'\x05\x00')
         if users:

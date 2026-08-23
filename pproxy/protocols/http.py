@@ -1,16 +1,19 @@
 """HTTP parsing helpers and HTTP-family protocol implementations."""
 
 import base64
+import asyncio
 import re
 import urllib.parse
 
 from .. import admin, transport
 from ..config import netloc_split
-from ..errors import ProtocolError
+from ..errors import AuthenticationError, ConnectionClosed, ProtocolError, RequestError
+from ..runtime import HTTP_HEADER_LIMIT
 from .base import DRAIN_BUFFER_SIZE, BaseProtocol
 
 HTTP_LINE = re.compile('([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
 HTTP_METHOD_LINE = re.compile(br'([^ ]+) +(.+?) +(HTTP/[^ ]+)$')
+MAX_HTTP_HEADER_SIZE = HTTP_HEADER_LIMIT
 
 
 def _decode_header_value(value):
@@ -71,7 +74,7 @@ class HTTP(BaseProtocol):
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
 
     async def accept(self, reader, user, writer, **kw):
-        lines = await transport.read_until(reader, b'\r\n\r\n')
+        lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
 
         async def reply(code, message, body=None, wait=False):
@@ -126,8 +129,8 @@ class HTTP(BaseProtocol):
                             text,
                             True,
                         )
-                        raise Exception('Connection closed')
-            raise Exception(f'404 {method} {url.path}')
+                        raise ConnectionClosed()
+            raise RequestError(f'404 {method} {url.path}')
         if users:
             user = authtable.authed()
             if not user:
@@ -138,7 +141,7 @@ class HTTP(BaseProtocol):
                         f'{ver} 407 Proxy Authentication Required\r\nConnection: close\r\nProxy-Authenticate: Basic realm="simple"\r\n\r\n'.encode(),
                         wait=True,
                     )
-                    raise Exception('Unauthorized HTTP')
+                    raise AuthenticationError('Unauthorized HTTP')
             authtable.set_authed(user)
         if method == 'CONNECT':
             host_name, port = netloc_split(authority or path)
@@ -184,7 +187,9 @@ class HTTP(BaseProtocol):
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except (ConnectionError, OSError, EOFError):
             pass
         finally:
             stat_conn(-1)
@@ -208,7 +213,7 @@ class HTTPOnly(HTTP):
                 host = host_name_pattern.search(b'\r\n' + request_head + b'\r\n')
                 if not header or not host:
                     writer_remote.close()
-                    raise Exception('Unknown HTTP header for protocol HTTPOnly')
+                    raise RequestError('Unknown HTTP header for protocol HTTPOnly')
                 method, path, ver = header.groups()
                 host_value = host.group(1)
                 data = (
@@ -243,8 +248,8 @@ class H2(HTTP):
         return await self.http_accept(
             user,
             headers[':method'],
-            headers[':path'],
-            headers[':authority'],
+            headers.get(':path', '/'),
+            headers.get(':authority'),
             '2.0',
             lines,
             '',
@@ -254,7 +259,7 @@ class H2(HTTP):
         )
 
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
-        headers = [(':method', 'CONNECT'), (':scheme', 'https'), (':path', '/'), (':authority', f'{host_name}:{port}')]
+        headers = [(':method', 'CONNECT'), (':authority', f'{host_name}:{port}')]
         if rauth:
             headers.append(('proxy-authorization', 'Basic ' + base64.b64encode(rauth)))
         writer_remote.send_headers(headers)
@@ -265,9 +270,11 @@ class H3(H2):
 
 
 class HTTPAdmin(HTTP):
+    MAX_HEADER_SIZE = 32 * 1024
+
     async def accept(self, reader, user, writer, **kw):
-        lines = await transport.read_until(reader, b'\r\n\r\n')
-        method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines[:-4])
+        lines = await transport.read_until(reader, b'\r\n\r\n', limit=self.MAX_HEADER_SIZE)
+        method, path, ver, filtered_headers, _, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         headers, lines = decode_http_header_block(filtered_headers)
 
         async def reply(code, message, body=None, wait=False):
@@ -277,18 +284,41 @@ class HTTPAdmin(HTTP):
             if wait:
                 await drain_if_needed(writer, force=True)
 
-        content_length = int(headers.get('Content-Length', '0'))
-        content = ''
+        users = kw.get('users') or ()
+        authorization = next(
+            (value for key, value in headers.items() if key.casefold() in {'authorization', 'proxy-authorization'}),
+            proxy_authorization,
+        )
+        authorized = next(
+            (candidate for candidate in users if authorization == 'Basic ' + base64.b64encode(candidate).decode()),
+            None,
+        )
+        if authorized is None:
+            writer.write(
+                f'{ver} 401 Unauthorized\r\nConnection: close\r\n'
+                'WWW-Authenticate: Basic realm="pproxy-admin"\r\n\r\n'.encode()
+            )
+            await drain_if_needed(writer, force=True)
+            raise AuthenticationError('Unauthorized HTTP admin')
+
+        try:
+            content_length = int(headers.get('Content-Length', '0'))
+        except ValueError as exc:
+            raise RequestError('Invalid Content-Length') from exc
+        if content_length < 0 or content_length > admin.MAX_ADMIN_BODY:
+            await reply('413 Payload Too Large', f'{ver} 413 Payload Too Large\r\nConnection: close\r\n\r\n'.encode(), wait=True)
+            raise RequestError('HTTP admin request body too large')
+        content = b''
         if content_length > 0:
             content = await transport.read_exactly(reader, content_length)
 
         url = urllib.parse.urlparse(path)
         if url.hostname is not None:
-            raise Exception('HTTP Admin Unsupported hostname')
+            raise RequestError('HTTP Admin Unsupported hostname')
         if method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
             for path, handler in admin.httpget.items():
                 if path == url.path:
                     await handler(reply=reply, ver=ver, method=method, headers=headers, lines=lines, content=content)
-                    raise Exception('Connection closed')
-            raise Exception(f'404 {method} {url.path}')
-        raise Exception(f'405 {method} not allowed')
+                    raise ConnectionClosed()
+            raise RequestError(f'404 {method} {url.path}')
+        raise RequestError(f'405 {method} not allowed')

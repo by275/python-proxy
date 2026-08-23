@@ -4,7 +4,16 @@ from typing import Any, Callable
 
 from . import server
 from .config import ProxyConfig
-from .errors import ProtocolError
+from .errors import (
+    AuthenticationError,
+    BlockedConnection,
+    ConfigurationError,
+    ConnectionClosed,
+    ProtocolError,
+    RequestError,
+    UpstreamError,
+    UnsupportedProtocol,
+)
 
 ProxyFactory = Callable[[str], Any]
 RuleFactory = Callable[[str], Callable[[str], Any]]
@@ -16,6 +25,10 @@ DIRECT = server.DIRECT
 
 __all__ = [
     "DIRECT",
+    "AuthenticationError",
+    "BlockedConnection",
+    "ConfigurationError",
+    "ConnectionClosed",
     "Connection",
     "ProtocolError",
     "ProxyFactory",
@@ -23,4 +36,7 @@ __all__ = [
     "Rule",
     "RuleFactory",
     "Server",
+    "RequestError",
+    "UpstreamError",
+    "UnsupportedProtocol",
 ]

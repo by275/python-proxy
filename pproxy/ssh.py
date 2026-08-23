@@ -3,6 +3,7 @@
 import asyncio
 
 from . import server as runtime
+from .errors import ConfigurationError
 
 
 class ProxySSH(runtime.ProxySimple):
@@ -40,27 +41,31 @@ class ProxySSH(runtime.ProxySimple):
             self.sshconn = asyncio.get_running_loop().create_future()
             try:
                 import asyncssh
-            except Exception as exc:
-                raise Exception('Missing library: "pip3 install asyncssh"') from exc  # noqa: TRY002
+            except ImportError as exc:
+                self.sshconn.cancel()
+                self.sshconn = None
+                raise ConfigurationError('Missing library: "pip3 install asyncssh"') from exc
             username, password = self.auth.decode().split(':', 1)
             if password.startswith(':'):
                 client_keys = [password[1:]]
                 password = None
             else:
                 client_keys = None
-            conn = await asyncssh.connect(
+            connect_kwargs = dict(
                 host=self.host_name,
                 port=self.port,
                 local_addr=local_addr,
                 family=family,
                 x509_trusted_certs=None,
-                known_hosts=None,
                 username=username,
                 password=password,
                 client_keys=client_keys,
                 keepalive_interval=60,
                 tunnel=tunnel,
             )
+            if self.insecure_host_key:
+                connect_kwargs['known_hosts'] = None
+            conn = await asyncssh.connect(**connect_kwargs)
             self.sshconn.set_result(conn)
 
     async def wait_open_connection(self, host, port, local_addr, family, tunnel=None):
@@ -77,15 +82,16 @@ class ProxySSH(runtime.ProxySimple):
                     reader, writer = await conn.open_connection(host, port)
                 reader, writer = self.patch_stream(reader, writer, host, port)
             return reader, writer
+        # Clear the shared future for backend-specific connection failures.
         except Exception as ex:
-            if not self.sshconn.done():
+            if self.sshconn is not None and not self.sshconn.done():
                 self.sshconn.set_exception(ex)
             self.sshconn = None
             raise
 
     async def start_server(self, args, stream_handler=runtime.stream_handler, tunnel=None):
         if type(self.jump) is runtime.ProxyDirect:
-            raise Exception('ssh server mode unsupported')  # noqa: TRY002
+            raise ConfigurationError('ssh server mode unsupported')
         await self.wait_ssh_connection(tunnel=tunnel)
         conn = self.sshconn.result()
         if isinstance(self.jump, ProxySSH):

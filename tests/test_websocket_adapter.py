@@ -1,5 +1,6 @@
 import unittest
 
+from pproxy.errors import ProtocolError
 from pproxy.websocket import WebSocketStream, xor_mask_bytes
 
 
@@ -32,6 +33,28 @@ class WebSocketAdapterTests(unittest.TestCase):
         self.assertEqual(reader.buffer, bytearray(b'ok'))
         writer.write(b'reply')
         self.assertEqual(writer.writes, [b'\x82\x05reply'])
+
+    def test_server_side_adapter_rejects_unmasked_input(self):
+        class Reader:
+            def feed_data(self, data):
+                return None
+
+        class Writer:
+            def __init__(self):
+                self.closed = False
+
+            def write(self, data):
+                return None
+
+            def close(self):
+                self.closed = True
+
+        reader, writer = Reader(), Writer()
+        adapter = WebSocketStream(reader, writer, expect_masked=True).attach()
+
+        with self.assertRaises(ProtocolError):
+            reader.feed_data(b'\x81\x02ok')
+        self.assertTrue(writer.closed)
 
 
 if __name__ == "__main__":

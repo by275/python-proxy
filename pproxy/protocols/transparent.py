@@ -45,7 +45,7 @@ class Redir(Transparent):
             buf = sock.getsockopt(SOL_IPV6, SO_ORIGINAL_DST, 28)
             require(len(buf) == 28)
             return socket.inet_ntop(socket.AF_INET6, buf[8:24]), int.from_bytes(buf[2:4], 'big')
-        except Exception:
+        except (OSError, ValueError, AssertionError):
             pass
 
 
@@ -74,7 +74,7 @@ class Pf(Transparent):
                 self.pf = open('/dev/pf', 'a+b')
             fcntl.ioctl(self.pf.fileno(), 0xc0544417, pnl)
             return socket.inet_ntop(sock.family, pnl[48:48 + len(src_ip)]), int.from_bytes(pnl[76:78], 'big')
-        except Exception:
+        except (OSError, ValueError, AssertionError):
             pass
 
 

@@ -5,7 +5,7 @@ from asyncio import create_task
 
 
 
-def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, verbose=None):
+def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, verbose=None, task_registry=None):
     """Wrap an asyncio stream with the project's asynchronous TLS adapter."""
     if sslcontext is None:
         return reader, writer
@@ -73,12 +73,18 @@ def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, ve
                     ssl.buffer_updated(data_len)
                 else:
                     ssl.data_received(data)
-        except Exception:  # noqa: BLE001, S110 - close the adapter on any stream failure
-            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - close the adapter on stream failure
+            if verbose:
+                verbose(f'TLS adapter failed: {exc}')
         finally:
             ssl.eof_received()
 
-    create_task(channel())
+    if task_registry is not None:
+        task_registry.create_task(channel(), name='tls-adapter')
+    else:
+        create_task(channel(), name='tls-adapter')
 
     class Writer:
         def get_extra_info(self, key):

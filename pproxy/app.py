@@ -18,7 +18,7 @@ def main(args=None):
         + '\nSupported protocols: http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel',
         epilog=f'Online help: <{__url__}>',
     )
-    parser.add_argument('-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri, help='tcp server uri (default: http+socks4+socks5://:8080/)')
+    parser.add_argument('-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri, help='tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)')
     parser.add_argument('-r', dest='rserver', default=[], action='append', type=runtime.proxies_by_uri, help='tcp remote server uri (default: direct)')
     parser.add_argument('-ul', dest='ulisten', default=[], action='append', type=runtime.proxies_by_uri, help='udp server setting uri (default: none)')
     parser.add_argument('-ur', dest='urserver', default=[], action='append', type=runtime.proxies_by_uri, help='udp remote server uri (default: direct)')
@@ -48,7 +48,7 @@ def main(args=None):
         asyncio.run(runtime.test_url(args.test, args.rserver))
         return
     if not args.listen and not args.ulisten:
-        args.listen.append(runtime.proxies_by_uri('http+socks4+socks5://:8080/'))
+        args.listen.append(runtime.proxies_by_uri(runtime.DEFAULT_LISTENER_URI))
     args.httpget = {}
     if args.pac:
         pactext = 'function FindProxyForURL(u,h){' + (f'var b=/^(:?{args.block.__self__.pattern})$/i;if(b.test(h))return "";' if args.block else '')
@@ -82,6 +82,8 @@ def main(args=None):
     admin.config.update({'argv': origin_argv, 'servers': servers, 'args': args, 'loop': loop})
 
     def print_fn(option, bind=None):
+        if runtime.is_unauthenticated_wildcard(option):
+            print('WARNING: wildcard listener has no authentication; use loopback or configure credentials')
         print('Serving on', (bind or option.bind), 'by', ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else ''), '({}{})'.format(option.cipher.name, ' ' + ','.join(i.name() for i in option.cipher.plugins) if option.cipher and option.cipher.plugins else '') if option.cipher else '')
 
     for option in args.listen:

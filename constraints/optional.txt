@@ -1,0 +1,6 @@
+# Compatibility ranges exercised by the optional-backend CI jobs.
+h2>=4.0,<5
+asyncssh>=2.5.0,<3
+aioquic>=0.9.7,<2
+pycryptodome>=3.7.2,<4
+uvloop>=0.13.0,<1

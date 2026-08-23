@@ -1,6 +1,9 @@
 import json
-import asyncio
+
+from .runtime import ADMIN_BODY_LIMIT
+
 config = {}
+MAX_ADMIN_BODY = ADMIN_BODY_LIMIT
 
 
 async def reply_http(reply, ver, code, content):
@@ -21,13 +24,23 @@ async def configs_handler(reply, **kwarg):
     ver = kwarg.get('ver')
 
     if method == 'GET':
-        data = {"argv": config['argv']}
+        data = {
+            "reload": bool(config.get('reload')),
+            "actions": ["reload"],
+        }
         value = json.dumps(data).encode()
         await reply_http(reply, ver, '200 OK', value)
     elif method == 'POST':
-        config['argv'] = kwarg.get('content').decode().split(' ')
+        try:
+            request = json.loads(kwarg.get('content', b'{}'))
+        except (TypeError, UnicodeDecodeError, json.JSONDecodeError):
+            await reply_http(reply, ver, '400 Bad Request', b'invalid JSON')
+            return
+        if request != {'action': 'reload'}:
+            await reply_http(reply, ver, '400 Bad Request', b'unsupported action')
+            return
         config['reload'] = True
-        data = {"result": 'ok'}
+        data = {"result": 'reload scheduled'}
         value = json.dumps(data).encode()
         await reply_http(reply, ver, '200 OK', value)
         raise KeyboardInterrupt

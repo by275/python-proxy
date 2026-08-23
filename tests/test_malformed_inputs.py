@@ -28,7 +28,7 @@ class MalformedParserTests(unittest.TestCase):
         reader.feed_data = received.append
         proto.WS(None).patch_ws_stream(reader, writer)
 
-        reader.feed_data(b"\x82\x7e\x00")
+        reader.feed_data(b"\x82\xfe\x00")
 
         self.assertEqual(received, [])
         self.assertEqual(writer.writes, [])
