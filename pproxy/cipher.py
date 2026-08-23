@@ -74,6 +74,8 @@ class AEADCipher(BaseCipher):
                     ret.extend(self.decrypt_and_verify(self._buffer[:self._declen], self._buffer[self._declen:self._declen+self.TAG_LENGTH]))
                     del self._buffer[:self._declen+self.TAG_LENGTH]
                     self._declen = None
+        # Crypto backends expose different exception classes; any failure must
+        # discard the packet state and fail closed.
         except Exception as exc:
             self._buffer.clear()
             self._declen = None

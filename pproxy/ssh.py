@@ -3,6 +3,7 @@
 import asyncio
 
 from . import server as runtime
+from .errors import ConfigurationError
 
 
 class ProxySSH(runtime.ProxySimple):
@@ -41,7 +42,9 @@ class ProxySSH(runtime.ProxySimple):
             try:
                 import asyncssh
             except ImportError as exc:
-                raise Exception('Missing library: "pip3 install asyncssh"') from exc  # noqa: TRY002
+                self.sshconn.cancel()
+                self.sshconn = None
+                raise ConfigurationError('Missing library: "pip3 install asyncssh"') from exc
             username, password = self.auth.decode().split(':', 1)
             if password.startswith(':'):
                 client_keys = [password[1:]]
@@ -79,15 +82,16 @@ class ProxySSH(runtime.ProxySimple):
                     reader, writer = await conn.open_connection(host, port)
                 reader, writer = self.patch_stream(reader, writer, host, port)
             return reader, writer
+        # Clear the shared future for backend-specific connection failures.
         except Exception as ex:
-            if not self.sshconn.done():
+            if self.sshconn is not None and not self.sshconn.done():
                 self.sshconn.set_exception(ex)
             self.sshconn = None
             raise
 
     async def start_server(self, args, stream_handler=runtime.stream_handler, tunnel=None):
         if type(self.jump) is runtime.ProxyDirect:
-            raise Exception('ssh server mode unsupported')  # noqa: TRY002
+            raise ConfigurationError('ssh server mode unsupported')
         await self.wait_ssh_connection(tunnel=tunnel)
         conn = self.sshconn.result()
         if isinstance(self.jump, ProxySSH):

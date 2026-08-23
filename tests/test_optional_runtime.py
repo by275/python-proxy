@@ -1,6 +1,7 @@
 """Runtime checks for optional transport security and lifecycle policy."""
 
 import asyncio
+import builtins
 import contextlib
 import importlib.util
 import socket
@@ -12,6 +13,7 @@ from ipaddress import ip_address
 from unittest.mock import AsyncMock, patch
 
 from pproxy import server
+from pproxy.errors import ConfigurationError
 from pproxy.h2 import ProxyH2
 from pproxy.protocols.http import H2
 
@@ -46,6 +48,21 @@ class OptionalRuntimePolicyTests(unittest.TestCase):
 
 
 class SSHHostKeyPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_asyncssh_does_not_leave_a_pending_connection(self):
+        option = server.proxies_by_uri("ssh://127.0.0.1:22/#user:secret")
+        original_import = builtins.__import__
+
+        def import_without_asyncssh(name, *args, **kwargs):
+            if name == 'asyncssh':
+                raise ImportError('test dependency missing')
+            return original_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=import_without_asyncssh):
+            with self.assertRaises(ConfigurationError):
+                await option.wait_ssh_connection()
+
+        self.assertIsNone(option.sshconn)
+
     @unittest.skipUnless(importlib.util.find_spec("asyncssh"), "asyncssh is not installed")
     async def test_known_hosts_verification_is_default(self):
         option = server.proxies_by_uri("ssh://127.0.0.1:22/#user:secret")
