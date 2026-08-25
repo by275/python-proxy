@@ -1,0 +1,9 @@
+.git
+.github
+docs
+tests
+__pycache__
+.pytest_cache
+build
+dist
+*.egg-info
