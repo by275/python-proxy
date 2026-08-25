@@ -15,7 +15,7 @@ def main(args=None):
 
     parser = argparse.ArgumentParser(
         description=__description__
-        + '\nSupported protocols: http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel',
+        + '\nSupported protocols: http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel,ws,cfp',
         epilog=f'Online help: <{__url__}>',
     )
     parser.add_argument('-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri, help='tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)')

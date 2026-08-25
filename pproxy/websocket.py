@@ -30,6 +30,7 @@ class WebSocketStream:
         expect_masked=False,
         max_frame_size=MAX_FRAME_SIZE,
         max_message_size=MAX_MESSAGE_SIZE,
+        on_close=None,
     ):
         self.reader = reader
         self.writer = writer
@@ -46,7 +47,9 @@ class WebSocketStream:
         self.message_buffer = bytearray()
         self.raw_write = writer.write
         self.on_message = reader.feed_data
+        self.on_close = on_close
         self.closed = False
+        self.close_sent = False
 
     def _fail(self, message):
         self.closed = True
@@ -61,6 +64,8 @@ class WebSocketStream:
             raise ProtocolError('WebSocket frame exceeds configured limit')
         if opcode >= 8 and (payload_length > 125 or opcode not in (8, 9, 10)):
             raise ProtocolError('invalid WebSocket control frame')
+        if opcode == 8:
+            self.close_sent = True
         if payload_length < 126:
             second = bytes([(payload_length | 0x80) if self.masked else payload_length])
         elif payload_length < 65536:
@@ -96,7 +101,11 @@ class WebSocketStream:
         elif self.opcode == 9:
             self.write_frame(10, payload)
         elif self.opcode == 8:
+            if not self.close_sent:
+                self.write_frame(8, payload)
             self.closed = True
+            if self.on_close is not None:
+                self.on_close(payload)
         elif self.opcode == 10:
             return
         else:
@@ -162,6 +171,12 @@ class WebSocketStream:
         return self.write_frame(2, data)
 
 
-def patch_stream(reader, writer, masked=False):
+def patch_stream(reader, writer, masked=False, *, on_close=None):
     """Install and return a :class:`WebSocketStream` adapter."""
-    return WebSocketStream(reader, writer, masked, expect_masked=not masked).attach()
+    return WebSocketStream(
+        reader,
+        writer,
+        masked,
+        expect_masked=not masked,
+        on_close=on_close,
+    ).attach()

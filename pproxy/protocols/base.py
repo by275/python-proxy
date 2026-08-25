@@ -2,6 +2,7 @@
 
 import asyncio
 
+from .. import transport
 from ..errors import UnsupportedProtocol
 
 DRAIN_BUFFER_SIZE = 256 * 1024
@@ -34,6 +35,7 @@ class BaseProtocol:
         raise UnsupportedProtocol(f'{self.name} don\'t support client')
 
     async def channel(self, reader, writer, stat_bytes, stat_conn):
+        normal_eof = reader.at_eof()
         try:
             stat_conn(1)
             pending_drain = 0
@@ -41,6 +43,7 @@ class BaseProtocol:
             while not reader.at_eof() and not writer.is_closing():
                 data = await read(65536)
                 if not data:
+                    normal_eof = True
                     break
                 if stat_bytes is None:
                     continue
@@ -56,7 +59,7 @@ class BaseProtocol:
             pass
         finally:
             stat_conn(-1)
-            writer.close()
+            await transport.close_writer(writer, graceful=normal_eof)
 
 
 class Direct(BaseProtocol):

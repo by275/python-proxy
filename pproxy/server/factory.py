@@ -33,12 +33,12 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
     protonames = [item.name for item in protos]
     if err_str:
         raise argparse.ArgumentTypeError(err_str)
-    if 'ssl' in rawprotos or 'secure' in rawprotos:
+    if 'ssl' in rawprotos or 'secure' in rawprotos or 'cfp' in rawprotos:
         import ssl
 
         sslserver = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         sslclient = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-        if 'ssl' in rawprotos:
+        if 'ssl' in rawprotos or 'insecure' in rawprotos:
             sslclient.check_hostname = False
             sslclient.verify_mode = ssl.CERT_NONE
         sslcontexts.append(sslserver)
@@ -101,7 +101,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
         host_name, port = proto.netloc_split(
             loc,
             default_host='127.0.0.1' if 'httpadmin' in protonames else None,
-            default_port=22 if 'ssh' in rawprotos else 8080,
+            default_port=22 if 'ssh' in rawprotos else 443 if 'cfp' in rawprotos else 8080,
         )
     else:
         host_name = port = None

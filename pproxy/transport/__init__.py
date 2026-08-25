@@ -2,6 +2,7 @@
 
 from .streams import (
     DEFAULT_TIMEOUT,
+    close_writer,
     prepend,
     read,
     read_exactly,
@@ -12,6 +13,7 @@ from .streams import (
 
 __all__ = [
     "DEFAULT_TIMEOUT",
+    "close_writer",
     "prepend",
     "read",
     "read_exactly",

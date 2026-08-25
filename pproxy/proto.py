@@ -43,6 +43,7 @@ Pf = transparent_protocol.Pf
 Tunnel = transparent_protocol.Tunnel
 Echo = transparent_protocol.Echo
 WS = websocket_protocol.WS
+CFP = websocket_protocol.CFP
 accept = registry_protocol.accept
 udp_accept = registry_protocol.udp_accept
 MAPPINGS = registry_protocol.MAPPINGS

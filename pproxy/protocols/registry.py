@@ -10,7 +10,7 @@ from ..errors import ConnectionClosed, ProtocolError, UnsupportedProtocol
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
 from .transparent import Echo, Pf, Redir, SSH, Tunnel
-from .websocket import WS
+from .websocket import CFP, WS
 
 
 MAPPINGS = dict(
@@ -29,6 +29,7 @@ MAPPINGS = dict(
     tunnel=Tunnel,
     echo=Echo,
     ws=WS,
+    cfp=CFP,
     trojan=Trojan,
     h2=H2,
     h3=H3,
@@ -69,6 +70,7 @@ PROTOCOL_METADATA: dict[str, ProtocolMetadata] = {
     'tunnel': ProtocolMetadata(True, True, True, True),
     'echo': ProtocolMetadata(True, True, False, True),
     'ws': ProtocolMetadata(True, False, True, True),
+    'cfp': ProtocolMetadata(True, False, True, False, default_port=443),
     'trojan': ProtocolMetadata(True, False, True, True),
     'h2': ProtocolMetadata(True, False, True, True, 'h2'),
     'h3': ProtocolMetadata(False, True, True, True, 'aioquic'),

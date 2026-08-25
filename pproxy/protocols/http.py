@@ -165,6 +165,7 @@ class HTTP(BaseProtocol):
         await transport.read_until(reader_remote, b'\r\n\r\n')
 
     async def http_channel(self, reader, writer, stat_bytes, stat_conn):
+        normal_eof = reader.at_eof()
         try:
             stat_conn(1)
             pending_drain = 0
@@ -172,6 +173,7 @@ class HTTP(BaseProtocol):
             while not reader.at_eof() and not writer.is_closing():
                 data = await read(65536)
                 if not data:
+                    normal_eof = True
                     break
                 request_line, sep, _ = data.partition(b'\r\n')
                 if sep and HTTP_METHOD_LINE.match(request_line):
@@ -193,7 +195,7 @@ class HTTP(BaseProtocol):
             pass
         finally:
             stat_conn(-1)
-            writer.close()
+            await transport.close_writer(writer, graceful=normal_eof)
 
 
 class HTTPOnly(HTTP):

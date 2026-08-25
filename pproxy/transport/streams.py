@@ -42,6 +42,24 @@ async def read_until(
     return result
 
 
+async def close_writer(writer: Any, graceful: bool = False) -> None:
+    """Close a stream, allowing an adapter-specific graceful close first."""
+    if graceful:
+        graceful_close = getattr(writer, 'graceful_close', None)
+        if graceful_close is not None:
+            try:
+                await graceful_close()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+    try:
+        writer.close()
+    except (AttributeError, OSError):
+        pass
+
+
 def rollback(reader: Any, data: bytes) -> None:
     """Put already-read bytes back in front of a stream."""
     method = getattr(reader, "rollback", None)

@@ -5,7 +5,7 @@ python-proxy
 
 .. |made-with-python| image:: https://img.shields.io/badge/Made%20with-Python-1f425f.svg
    :target: https://www.python.org/
-HTTP/HTTP2/HTTP3/Socks4/Socks5/Shadowsocks/SSH/Redirect/Pf/QUIC TCP/UDP asynchronous tunnel proxy implemented in Python3 asyncio.
+HTTP/HTTP2/HTTP3/Socks4/Socks5/Shadowsocks/SSH/Redirect/Pf/QUIC/CFP TCP/UDP asynchronous tunnel proxy implemented in Python3 asyncio.
 
 QuickStart
 ----------
@@ -69,6 +69,7 @@ Features
 - Tunnel/jump/backward-jump support.
 - Unix domain socket support.
 - HTTP v2, HTTP v3 (QUIC)
+- Authenticated worker WebSocket tunnel (CFP)
 - User/password authentication support.
 - Filter/block hostname by regex patterns.
 - SSL/TLS client/server support.
@@ -127,6 +128,8 @@ Protocols
 +-------------------+------------+------------+------------+------------+--------------+
 | websocket         | ✔          | ✔          |            |            | ws://        |
 | (simple tunnel)   |            |            |            |            | ws{dst_ip}://|
++-------------------+------------+------------+------------+------------+--------------+
+| cfp worker tunnel |            | ✔          |            |            | cfp://       |
 +-------------------+------------+------------+------------+------------+--------------+
 | xxx over TLS      | ✔          | ✔          |            |            | xxx+ssl://   |
 +-------------------+------------+------------+------------+------------+--------------+
@@ -197,7 +200,7 @@ Usage
                 [--sys] [--reuse] [--daemon] [--test TEST] [--version]
 
   Proxy server that can tunnel among remote servers by regex rules. Supported
-  protocols include http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel
+  protocols include http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel,ws,cfp
 
   options:
     -h, --help        show this help message and exit
@@ -222,9 +225,6 @@ Usage
 
   Online help: <https://github.com/qwj/python-proxy>
 
-The ``cfp://`` Cloudflare Worker protocol is a planned compatibility target from
-the ``feat-cfp`` branch and is not enabled in this branch yet.
-
 URI Syntax
 ----------
 
@@ -234,7 +234,7 @@ URI Syntax
 
 - scheme
 
-  - Currently supported scheme: http, socks, ss, ssl, secure. You can use + to link multiple protocols together.
+  - Currently supported scheme: http, socks, ss, ssl, secure, cfp. You can use + to link multiple protocols together.
 
     +----------+-----------------------------+
     | http     | http protocol (CONNECT)     |
@@ -265,6 +265,8 @@ URI Syntax
     +----------+-----------------------------+
     | ws       | websocket connection        |
     +----------+-----------------------------+
+    | cfp      | authenticated worker tunnel |
+    +----------+-----------------------------+
     | echo     | echo-back service           |
     +----------+-----------------------------+
     | direct   | direct connection           |
@@ -272,7 +274,11 @@ URI Syntax
 
 .. _trojan: https://trojan-gfw.github.io/trojan/protocol
 
-  - "http://" accepts GET/POST/CONNECT as server, sends CONNECT as client. "httponly://" sends "GET/POST" as client, works only on http traffic.
+- "http://" accepts GET/POST/CONNECT as server, sends CONNECT as client. "httponly://" sends "GET/POST" as client, works only on http traffic.
+
+  - ``cfp://host[:port]/#[authorization]`` connects to an authenticated worker
+    WebSocket tunnel. The default port is 443. Use ``cfp+insecure://`` only when
+    certificate verification is intentionally disabled.
 
   - Valid schemes: http://, http+socks4+socks5://, http+ssl://, ss+secure://, http+socks5+ss://
 
