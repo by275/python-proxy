@@ -148,8 +148,8 @@ class ProxyDirect:
     def udp_prepare_connection(self, host, port, data):
         return data
 
-    def wait_open_connection(self, host, port, local_addr, family):
-        return asyncio.open_connection(host=host, port=port, local_addr=local_addr, family=family)
+    async def wait_open_connection(self, host, port, local_addr, family):
+        return await asyncio.open_connection(host=host, port=port, local_addr=local_addr, family=family)
 
     async def open_connection(self, host, port, local_addr, lbind, timeout=SOCKET_TIMEOUT):
         local_addr = (
@@ -237,7 +237,7 @@ class ProxySimple(ProxyDirect):
             data = self.cipher.datagram.encrypt(data)
         return data
 
-    def udp_start_server(self, args):
+    async def udp_start_server(self, args):
         from .handlers import datagram_handler
 
         owner = self
@@ -260,12 +260,12 @@ class ProxySimple(ProxyDirect):
                 owner.task_registry.create_task(handle_datagram(), name='udp-datagram')
 
         loop = asyncio.get_running_loop()
-        return loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
+        return await loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
 
-    def wait_open_connection(self, host, port, local_addr, family):
+    async def wait_open_connection(self, host, port, local_addr, family):
         if self.unix:
-            return asyncio.open_unix_connection(path=self.bind)
-        return asyncio.open_connection(host=self.host_name, port=self.port, local_addr=local_addr, family=family)
+            return await asyncio.open_unix_connection(path=self.bind)
+        return await asyncio.open_connection(host=self.host_name, port=self.port, local_addr=local_addr, family=family)
 
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
         reader_remote, writer_remote = proto.sslwrap(
@@ -290,7 +290,7 @@ class ProxySimple(ProxyDirect):
         )
         return await self.jump.prepare_connection(reader_remote, writer_remote, host, port)
 
-    def start_server(self, args, stream_handler=None):
+    async def start_server(self, args, stream_handler=None):
         if stream_handler is None:
             from .handlers import stream_handler
 
@@ -304,8 +304,13 @@ class ProxySimple(ProxyDirect):
                 self.writers.discard(writer)
 
         if self.unix:
-            return asyncio.start_unix_server(tracked_handler, path=self.bind)
-        return asyncio.start_server(tracked_handler, host=self.host_name, port=self.port, reuse_port=args.get('ruport'))
+            return await asyncio.start_unix_server(tracked_handler, path=self.bind)
+        return await asyncio.start_server(
+            tracked_handler,
+            host=self.host_name,
+            port=self.port,
+            reuse_port=args.get('ruport'),
+        )
 
 
 class ProxyBackward(ProxySimple):

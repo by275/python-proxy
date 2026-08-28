@@ -180,9 +180,9 @@ class ProxyH2(runtime.ProxySimple):
         streams[stream_id] = (stream_reader, stream_writer)
         return stream_reader, stream_writer
 
-    def start_server(self, args, stream_handler=runtime.stream_handler):
+    async def start_server(self, args, stream_handler=runtime.stream_handler):
         handler = functools.partial(stream_handler, **vars(self), **args)
-        return super().start_server(
+        return await super().start_server(
             args,
             functools.partial(self.handler, client_side=False, stream_handler=handler),
         )
