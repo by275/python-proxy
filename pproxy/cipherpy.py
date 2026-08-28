@@ -16,7 +16,7 @@ class Table_Cipher(BaseCipher):
             a, _ = struct.unpack('<QQ', hashlib.md5(self.key).digest())
             table = list(range(256))
             for i in range(1, 1024):
-                table.sort(key = lambda x: a % (x + i))
+                table.sort(key = lambda x, i=i: a % (x + i))
             self.encrypt_table = bytes(table)
             self.decrypt_table = bytes.maketrans(self.encrypt_table, bytes(range(256)))
             self.CACHE[self.key] = self.encrypt_table, self.decrypt_table

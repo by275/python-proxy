@@ -1,6 +1,5 @@
 """Contract tests for the authenticated worker WebSocket protocol."""
 
-import asyncio
 import base64
 import hashlib
 import re
@@ -109,7 +108,9 @@ class CFPHandshakeTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(options=options):
                 writer = FakeWriter()
-                reader = FakeReader(lambda: response_for(writer, **options))
+                reader = FakeReader(
+                    lambda writer=writer, options=options: response_for(writer, **options)
+                )
                 with self.assertRaises(ProtocolError):
                     await proto.CFP(None).connect(
                         reader,

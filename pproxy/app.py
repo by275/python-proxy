@@ -81,7 +81,7 @@ def main(args=None):
     servers = []
     admin.config.update({'argv': origin_argv, 'servers': servers, 'args': args, 'loop': loop})
 
-    def print_fn(option, bind=None):
+    def print_tcp_server(option, bind=None):
         if runtime.is_unauthenticated_wildcard(option):
             print('WARNING: wildcard listener has no authentication; use loopback or configure credentials')
         print('Serving on', (bind or option.bind), 'by', ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else ''), '({}{})'.format(option.cipher.name, ' ' + ','.join(i.name() for i in option.cipher.plugins) if option.cipher and option.cipher.plugins else '') if option.cipher else '')
@@ -89,35 +89,35 @@ def main(args=None):
     for option in args.listen:
         try:
             handler = loop.run_until_complete(option.start_server(vars(args)))
-            runtime.print_server_started(option, handler, print_fn)
+            runtime.print_server_started(option, handler, print_tcp_server)
             servers.append(handler)
         except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
-            print_fn(option)
+            print_tcp_server(option)
             print('Start server failed.\n\t==>', ex)
 
-    def print_fn(option, bind=None):
+    def print_udp_server(option, bind=None):
         print('Serving on UDP', (bind or option.bind), 'by', ','.join(i.name for i in option.protos), f'({option.cipher.name})' if option.cipher else '')
 
     for option in args.ulisten:
         try:
             handler, _protocol = loop.run_until_complete(option.udp_start_server(vars(args)))
-            runtime.print_server_started(option, handler, print_fn)
+            runtime.print_server_started(option, handler, print_udp_server)
             servers.append(handler)
         except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
-            print_fn(option)
+            print_udp_server(option)
             print('Start server failed.\n\t==>', ex)
 
-    def print_fn(option, bind=None):
+    def print_backward_server(option, bind=None):
         print('Serving on', (bind or option.bind), 'backward by', ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else ''), '({}{})'.format(option.cipher.name, ' ' + ','.join(i.name() for i in option.cipher.plugins) if option.cipher and option.cipher.plugins else '') if option.cipher else '')
 
     for option in args.rserver:
         if isinstance(option, runtime.ProxyBackward):
             try:
                 handler = loop.run_until_complete(option.start_backward_client(vars(args)))
-                runtime.print_server_started(option, handler, print_fn)
+                runtime.print_server_started(option, handler, print_backward_server)
                 servers.append(handler)
             except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
-                print_fn(option)
+                print_backward_server(option)
                 print('Start server failed.\n\t==>', ex)
     if servers:
         if args.sys:
