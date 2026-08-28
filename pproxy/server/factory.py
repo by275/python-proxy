@@ -106,7 +106,7 @@ def proxy_by_uri(uri: str, jump: Any) -> Any:
     else:
         host_name = port = None
     if url.fragment.startswith('#'):
-        with open(url.fragment[1:]) as auth_file:
+        with open(url.fragment[1:], encoding='utf-8') as auth_file:
             auth = auth_file.read().rstrip().encode()
     else:
         auth = url.fragment.encode()

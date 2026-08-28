@@ -91,7 +91,7 @@ def main(args=None):
             handler = loop.run_until_complete(option.start_server(vars(args)))
             runtime.print_server_started(option, handler, print_tcp_server)
             servers.append(handler)
-        except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
+        except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
             print_tcp_server(option)
             print('Start server failed.\n\t==>', ex)
 
@@ -103,7 +103,7 @@ def main(args=None):
             handler, _protocol = loop.run_until_complete(option.udp_start_server(vars(args)))
             runtime.print_server_started(option, handler, print_udp_server)
             servers.append(handler)
-        except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
+        except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
             print_udp_server(option)
             print('Start server failed.\n\t==>', ex)
 
@@ -116,7 +116,7 @@ def main(args=None):
                 handler = loop.run_until_complete(option.start_backward_client(vars(args)))
                 runtime.print_server_started(option, handler, print_backward_server)
                 servers.append(handler)
-            except Exception as ex:  # noqa: BLE001 - preserve CLI startup reporting
+            except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
                 print_backward_server(option)
                 print('Start server failed.\n\t==>', ex)
     if servers:

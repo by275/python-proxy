@@ -50,7 +50,7 @@ class ProxyQUIC(runtime.ProxySimple):
             self.writers.discard(writer)
             try:
                 writer.write_eof()
-            except Exception:  # noqa: BLE001, S110 - preserve best-effort close
+            except Exception:  # pylint: disable=broad-exception-caught  # QUIC close is best effort
                 pass
 
         writer.close = close
@@ -96,7 +96,7 @@ class ProxyQUIC(runtime.ProxySimple):
             if not handshake.done():
                 handshake.cancel()
             raise
-        except Exception as exc:  # noqa: BLE001 - publish adapter failures to waiters
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # publish adapter failures to waiters
             if not handshake.done():
                 handshake.set_exception(exc)
             if not handshake.cancelled():

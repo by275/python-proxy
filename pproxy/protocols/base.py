@@ -1,7 +1,5 @@
 """Shared protocol base classes and bidirectional stream behavior."""
 
-import asyncio
-
 from .. import transport
 from ..errors import UnsupportedProtocol
 
@@ -53,8 +51,6 @@ class BaseProtocol:
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except asyncio.CancelledError:
-            raise
         except (ConnectionError, OSError, EOFError):
             pass
         finally:

@@ -48,8 +48,6 @@ class ProxyH2(runtime.ProxySimple):
                 if not data:
                     break
                 events = conn.receive_data(data)
-            except asyncio.CancelledError:
-                raise
             except (h2.exceptions.H2Error, ConnectionError, OSError, EOFError, ValueError) as exc:
                 if self.handshake is not None and not self.handshake.done():
                     self.handshake.set_exception(exc)

@@ -50,9 +50,7 @@ async def close_writer(writer: Any, graceful: bool = False) -> None:
             try:
                 await graceful_close()
                 return
-            except asyncio.CancelledError:
-                raise
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught  # fall back to hard close
                 pass
     try:
         writer.close()

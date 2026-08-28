@@ -189,8 +189,6 @@ class HTTP(BaseProtocol):
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except asyncio.CancelledError:
-            raise
         except (ConnectionError, OSError, EOFError):
             pass
         finally:

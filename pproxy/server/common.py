@@ -69,7 +69,7 @@ def compile_rule(filename: str) -> Callable[[str], Any]:
     """Compile an inline rule or a newline-delimited rule file."""
     if filename.startswith("{") and filename.endswith("}"):
         return re.compile(filename[1:-1]).match
-    with open(filename) as rule_file:
+    with open(filename, encoding='utf-8') as rule_file:
         return re.compile(
             '(:?' + ''.join(
                 '|'.join(item.strip() for item in rule_file if item.strip() and not item.startswith('#'))

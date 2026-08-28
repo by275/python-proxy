@@ -160,9 +160,7 @@ class CFP(WS):
                     await writer_remote.drain()
                     await asyncio.wait_for(close_event.wait(), CFP_CLOSE_TIMEOUT)
                     await writer_remote.drain()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught  # always perform raw close
                     pass
                 finally:
                     raw_close()

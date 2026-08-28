@@ -73,9 +73,7 @@ def wrap(reader, writer, sslcontext, server_side=False, server_hostname=None, ve
                     ssl.buffer_updated(data_len)
                 else:
                     ssl.data_received(data)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - close the adapter on stream failure
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # close adapter on stream failure
             if verbose:
                 verbose(f'TLS adapter failed: {exc}')
         finally:

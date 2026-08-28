@@ -18,7 +18,7 @@ def _git_version(root):
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
     dirty = description.endswith('-dirty')
     if dirty:
@@ -44,7 +44,7 @@ def _source_version():
         from setuptools_scm import get_version
 
         return get_version(root=root)
-    except Exception:
+    except (ImportError, LookupError, OSError, RuntimeError, ValueError):
         return _git_version(root)
 
 

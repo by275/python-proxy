@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .base import Direct
-from ..errors import ConnectionClosed, ProtocolError, UnsupportedProtocol
+from ..errors import ConnectionClosed, UnsupportedProtocol
 from .http import H2, H3, HTTP, HTTPAdmin, HTTPOnly
 from .socks import SS, SSR, Socks4, Socks5, Trojan
 from .transparent import Echo, Pf, Redir, SSH, Tunnel
@@ -110,8 +110,6 @@ async def accept(protos: Iterable[Any], reader: Any, **kw: Any) -> tuple[Any, ..
     for protocol in protos:
         try:
             user = await protocol.guess(reader, **kw)
-        except ProtocolError:
-            raise
         except (asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
             raise ConnectionClosed() from exc
         if user:
