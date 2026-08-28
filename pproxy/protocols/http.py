@@ -178,7 +178,7 @@ class HTTP(BaseProtocol):
         )
         await transport.read_until(reader_remote, b'\r\n\r\n')
 
-    async def http_channel(self, reader, writer, stat_bytes, stat_conn):
+    async def http_channel(self, reader, writer, stat_bytes, stat_conn):  # pylint: disable=too-many-locals
         """Forward HTTP requests while rewriting absolute request targets."""
         normal_eof = reader.at_eof()
         try:
@@ -304,7 +304,7 @@ class HTTPAdmin(HTTP):
 
     MAX_HEADER_SIZE = 32 * 1024
 
-    async def accept(self, reader, user, writer, **kw):
+    async def accept(self, reader, user, writer, **kw):  # pylint: disable=too-many-locals
         """Authenticate, bound, and dispatch one administration request."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=self.MAX_HEADER_SIZE)
         method, path, ver, filtered_headers, _, proxy_authorization, _ = parse_http_request_head(lines[:-4])
