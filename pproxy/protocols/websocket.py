@@ -26,7 +26,9 @@ class WS(BaseProtocol):
         """Install WebSocket framing on a pair of asynchronous streams."""
         return websocket.patch_stream(reader, writer, masked, on_close=on_close)
 
-    async def accept(self, reader, user, writer, users, authtable, sock, **kw):
+    async def accept(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,unused-argument
+        self, reader, user, writer, users, authtable, sock, **kw
+    ):
         """Authenticate and accept a local WebSocket proxy handshake."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
@@ -68,7 +70,7 @@ class WS(BaseProtocol):
 
     # The upstream adapter accepts the local host parameter by contract.
     # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         """Open a WebSocket tunnel through a compatible upstream proxy."""
         seckey = base64.b64encode(os.urandom(16)).decode()
         writer_remote.write(
@@ -103,7 +105,8 @@ class CFP(WS):
             host_name = f'[{host_name}]'
         return f'{host_name}:{port}'
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+    # The CFP handshake keeps the shared upstream callback contract.
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         seckey = base64.b64encode(os.urandom(16)).decode()
         target = self._header_value('X-Proxy-Target', self._target(host_name, port))
         myhost = self._header_value('Host', myhost)

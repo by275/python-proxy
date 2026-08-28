@@ -45,13 +45,14 @@ class ProxyDirect:
     @property
     def direct(self):
         """Return whether this is the unconfigured direct strategy."""
-        return type(self) is ProxyDirect
+        # Subclasses represent configured strategies and must not be treated as direct.
+        return type(self) is ProxyDirect  # pylint: disable=unidiomatic-typecheck
 
     def logtext(self, host, port):
         """Format the destination suffix used in connection diagnostics."""
         return '' if host == 'tunnel' else f' -> {host}:{port}'
 
-    def match_rule(self, host, port):
+    def match_rule(self, host, port):  # pylint: disable=unused-argument
         """Return whether this strategy accepts the destination."""
         return True
 
@@ -170,7 +171,7 @@ class ProxyDirect:
     async def __aexit__(self, exc_type, exc, tb):
         await self.aclose()
 
-    def udp_prepare_connection(self, host, port, data):
+    def udp_prepare_connection(self, host, port, data):  # pylint: disable=unused-argument
         """Prepare a UDP payload before protocol-specific framing."""
         return data
 
@@ -189,7 +190,7 @@ class ProxyDirect:
         reader, writer = await asyncio.wait_for(wait, timeout=timeout)
         return reader, writer
 
-    async def prepare_connection(self, reader_remote, writer_remote, host, port):
+    async def prepare_connection(self, reader_remote, writer_remote, host, port):  # pylint: disable=unused-argument
         """Apply backend-specific stream preparation before protocol framing."""
         return reader_remote, writer_remote
 
@@ -221,7 +222,9 @@ DIRECT = ProxyDirect()
 class ProxySimple(ProxyDirect):
     """Proxy connection strategy with a configured protocol and optional jump."""
 
-    def __init__(self, jump, protos, cipher, users, rule, bind,
+    # This constructor mirrors the parsed proxy configuration fields.
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, jump, protos, cipher, users, rule, bind,
                  host_name, port, unix, lbind, sslclient, sslserver,
                  insecure_host_key=False):
         super().__init__(lbind)
@@ -369,7 +372,8 @@ class ProxyBackward(ProxySimple):
         super().__init__(**kw)
         self.backward = backward
         self.server = backward
-        while type(self.server.jump) != ProxyDirect:
+        # Only the exact direct sentinel terminates the jump-chain traversal.
+        while type(self.server.jump) != ProxyDirect:  # pylint: disable=unidiomatic-typecheck
             self.server = self.server.jump
         self.backward_num = backward_num
         self.closed = False
@@ -390,7 +394,7 @@ class ProxyBackward(ProxySimple):
             if reader.at_eof() and not writer.is_closing():
                 writer.close()
 
-    async def wait_open_connection(self, *args):
+    async def wait_open_connection(self, *args):  # pylint: disable=unused-argument
         """Return the next healthy connection supplied by a reverse tunnel."""
         while True:
             reader, writer, watcher = await self.conn.get()
@@ -479,7 +483,7 @@ class ProxyBackward(ProxySimple):
 
     def start_backward_client(self, args):
         """Start the listener that receives reverse-tunnel connections."""
-        async def handler(reader, writer, **kw):
+        async def handler(reader, writer, **kw):  # pylint: disable=unused-argument
             """Authenticate and enqueue one reverse-tunnel client."""
             auth = self.server.auth
             if getattr(self.server, 'quicserver', None) is not None:
@@ -501,7 +505,8 @@ async def check_server_alive(interval, rserver, verbose):
     while True:
         await asyncio.sleep(interval)
         for remote in rserver:
-            if type(remote) is ProxyDirect:
+            # Configured subclasses need health checks; skip only the direct sentinel.
+            if type(remote) is ProxyDirect:  # pylint: disable=unidiomatic-typecheck
                 continue
             try:
                 _, writer = await remote.open_connection(None, None, None, None, timeout=3)

@@ -11,7 +11,9 @@ from .base import BaseProtocol
 class SSH(BaseProtocol):
     """Protocol marker for SSH-managed direct connections."""
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+    async def connect(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,unused-argument
+        self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw
+    ):
         """Leave connection setup to the SSH transport layer."""
 
 
@@ -22,17 +24,17 @@ class Transparent(BaseProtocol):
         """Return the destination endpoint associated with a local socket."""
         raise NotImplementedError(f'{self.name} must implement query_remote()')
 
-    async def guess(self, reader, sock, **kw):
+    async def guess(self, reader, sock, **kw):  # pylint: disable=unused-argument
         """Check whether the socket has a usable transparent destination."""
         remote = self.query_remote(sock)
         return remote is not None and (sock is None or sock.getsockname() != remote)
 
-    async def accept(self, reader, user, sock, **kw):
+    async def accept(self, reader, user, sock, **kw):  # pylint: disable=unused-argument
         """Return the transparent destination for a TCP client."""
         remote = self.query_remote(sock)
         return user, remote[0], remote[1]
 
-    def udp_accept(self, data, sock, **kw):
+    def udp_accept(self, data, sock, **kw):  # pylint: disable=arguments-differ,unused-argument
         """Return the transparent destination for a UDP datagram."""
         remote = self.query_remote(sock)
         return True, remote[0], remote[1], data
@@ -109,7 +111,7 @@ class Tunnel(Transparent):
         dst = sock.getsockname() if sock else (None, None)
         return config.netloc_split(self.param, dst[0], dst[1])
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):  # pylint: disable=unused-argument
         """Leave tunnel setup to the surrounding connection handler."""
 
     def udp_connect(self, rauth, host_name, port, data, **kw):

@@ -33,7 +33,7 @@ class BaseProtocol:
         """Remove protocol framing from a UDP response."""
         return data
 
-    def udp_pack(self, host_name, port, data):
+    def udp_pack(self, host_name, port, data):  # pylint: disable=unused-argument
         """Add protocol framing to a UDP payload."""
         return data
 

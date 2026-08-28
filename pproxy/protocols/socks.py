@@ -20,7 +20,7 @@ def packstr(value, size=1):
 class Trojan(BaseProtocol):
     """Implement the Trojan stream handshake and target framing."""
 
-    async def guess(self, reader, users, **kw):
+    async def guess(self, reader, users, **kw):  # pylint: disable=unused-argument
         """Detect and authenticate a Trojan client preamble."""
         header = await transport.read(reader, 56)
         if users:
@@ -31,7 +31,7 @@ class Trojan(BaseProtocol):
             return True
         transport.rollback(reader, header)
 
-    async def accept(self, reader, user, **kw):
+    async def accept(self, reader, user, **kw):  # pylint: disable=unused-argument
         """Read a Trojan target request from a local client."""
         require(await transport.read_exactly(reader, 2) == b'\x0d\x0a')
         if (await transport.read_exactly(reader, 1))[0] != 1:
@@ -55,7 +55,7 @@ class Trojan(BaseProtocol):
 class SSR(BaseProtocol):
     """Implement the ShadowsocksR handshake framing."""
 
-    async def guess(self, reader, users, **kw):
+    async def guess(self, reader, users, **kw):  # pylint: disable=unused-argument
         """Detect an SSR client header and identify its user."""
         if users:
             header = await transport.read(reader, max(len(item) for item in users))
@@ -69,7 +69,7 @@ class SSR(BaseProtocol):
         transport.rollback(reader, header)
         return header[0] in (1, 3, 4, 17, 19, 20)
 
-    async def accept(self, reader, user, **kw):
+    async def accept(self, reader, user, **kw):  # pylint: disable=unused-argument
         """Read an SSR target request from a local client."""
         host_name, port, _ = await socks_address_stream(
             reader,
@@ -140,7 +140,7 @@ class SS(SSR):
 
         writer.write = write
 
-    async def accept(self, reader, user, reader_cipher, **kw):
+    async def accept(self, reader, user, reader_cipher, **kw):  # pylint: disable=arguments-differ,unused-argument
         """Read and validate a Shadowsocks target request."""
         header = await transport.read_exactly(reader, 1)
         ota = header[0] & 0x10 == 0x10
@@ -155,7 +155,9 @@ class SS(SSR):
             self.patch_ota_reader(reader_cipher, reader)
         return user, host_name, port
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, writer_cipher_r, **kw):
+    async def connect(  # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,unused-argument
+        self, reader_remote, writer_remote, rauth, host_name, port, writer_cipher_r, **kw
+    ):
         """Write a Shadowsocks target request and optional OTA metadata."""
         writer_remote.write(rauth)
         if writer_cipher_r and writer_cipher_r.ota:
@@ -166,7 +168,7 @@ class SS(SSR):
         else:
             writer_remote.write(b'\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big'))
 
-    def udp_accept(self, data, users, **kw):
+    def udp_accept(self, data, users, **kw):  # pylint: disable=arguments-differ,unused-argument
         """Decode a Shadowsocks UDP datagram received by the proxy."""
         reader = io.BytesIO(data)
         user = True
@@ -204,14 +206,14 @@ class SS(SSR):
 class Socks4(BaseProtocol):
     """Implement the SOCKS4 client and upstream handshake."""
 
-    async def guess(self, reader, **kw):
+    async def guess(self, reader, **kw):  # pylint: disable=unused-argument
         """Detect a SOCKS4 request version byte."""
         header = await transport.read(reader, 1)
         if header == b'\x04':
             return True
         transport.rollback(reader, header)
 
-    async def accept(self, reader, user, writer, users, authtable, **kw):
+    async def accept(self, reader, user, writer, users, authtable, **kw):  # pylint: disable=unused-argument
         """Authenticate and read a SOCKS4 target request."""
         require(await transport.read_exactly(reader, 1) == b'\x01')
         port = int.from_bytes(await transport.read_exactly(reader, 2), 'big')
@@ -239,14 +241,14 @@ class Socks4(BaseProtocol):
 class Socks5(BaseProtocol):
     """Implement the SOCKS5 client and upstream handshake."""
 
-    async def guess(self, reader, **kw):
+    async def guess(self, reader, **kw):  # pylint: disable=unused-argument
         """Detect a SOCKS5 request version byte."""
         header = await transport.read(reader, 1)
         if header == b'\x05':
             return True
         transport.rollback(reader, header)
 
-    async def accept(self, reader, user, writer, users, authtable, **kw):
+    async def accept(self, reader, user, writer, users, authtable, **kw):  # pylint: disable=unused-argument
         """Authenticate and read a SOCKS5 target request."""
         methods = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
         user = authtable.authed()
@@ -273,7 +275,7 @@ class Socks5(BaseProtocol):
         writer.write(b'\x05\x00\x00' + header + data)
         return user, host_name, port
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):  # pylint: disable=unused-argument
         """Open a SOCKS5 tunnel through the remote proxy."""
         if rauth:
             writer_remote.write(b'\x05\x01\x02')
