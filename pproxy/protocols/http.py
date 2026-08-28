@@ -291,7 +291,9 @@ class H2(HTTP):
         """Send a CONNECT request on an HTTP/2 upstream stream."""
         headers = [(':method', 'CONNECT'), (':authority', f'{host_name}:{port}')]
         if rauth:
-            headers.append(('proxy-authorization', 'Basic ' + base64.b64encode(rauth)))
+            headers.append(
+                ('proxy-authorization', 'Basic ' + base64.b64encode(rauth).decode())
+            )
         writer_remote.send_headers(headers)
 
 
