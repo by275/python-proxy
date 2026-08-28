@@ -95,35 +95,46 @@ class ProxyH2(runtime.ProxySimple):
         config = h2.config.H2Configuration(client_side=client_side)
         conn = h2.connection.H2Connection(config=config)
         streams = {}
-        conn.initiate_connection()
-        writer.write(conn.data_to_send())
-        read = reader.read
-        while not reader.at_eof() and not writer.is_closing():
-            try:
-                data = await read(65636)
-                if not data:
-                    break
-                events = conn.receive_data(data)
-            except (h2.exceptions.H2Error, ConnectionError, OSError, EOFError, ValueError) as exc:
-                if self.handshake is not None and not self.handshake.done():
-                    self.handshake.set_exception(exc)
-                break
+        try:
+            conn.initiate_connection()
             writer.write(conn.data_to_send())
-            for event in events:
-                if self._handle_event(
-                    event,
-                    conn,
-                    streams,
-                    writer,
-                    client_side,
-                    stream_handler,
-                    h2.events,
-                ) is False:
+            read = reader.read
+            while not reader.at_eof() and not writer.is_closing():
+                try:
+                    data = await read(65636)
+                    if not data:
+                        break
+                    events = conn.receive_data(data)
+                except (h2.exceptions.H2Error, ConnectionError, OSError, EOFError, ValueError) as exc:
+                    if self.handshake is not None and not self.handshake.done():
+                        self.handshake.set_exception(exc)
                     break
-        writer.write(conn.data_to_send())
-        writer.close()
-        if self.handshake is not None and not self.handshake.done():
-            self.handshake.set_exception(ConnectionError('HTTP/2 connection closed'))
+                writer.write(conn.data_to_send())
+                for event in events:
+                    if self._handle_event(
+                        event,
+                        conn,
+                        streams,
+                        writer,
+                        client_side,
+                        stream_handler,
+                        h2.events,
+                    ) is False:
+                        break
+        finally:
+            try:
+                writer.write(conn.data_to_send())
+            except (ConnectionError, OSError):
+                pass
+            writer.close()
+            wait_closed = getattr(writer, 'wait_closed', None)
+            if wait_closed is not None:
+                try:
+                    await wait_closed()
+                except (ConnectionError, OSError):
+                    pass
+            if self.handshake is not None and not self.handshake.done():
+                self.handshake.set_exception(ConnectionError('HTTP/2 connection closed'))
 
     def get_stream(self, conn, writer, stream_id):
         """Create an HTTP/2 stream pair backed by flow-control events."""

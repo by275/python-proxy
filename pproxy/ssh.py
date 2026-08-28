@@ -36,6 +36,28 @@ class ProxySSH(runtime.ProxySimple):
         writer.get_extra_info = {"peername": remote_addr, "sockname": remote_addr}.get
         return reader, writer
 
+    def close(self):
+        """Close local streams and the shared SSH connection."""
+        super().close()
+        if self.sshconn is None or not self.sshconn.done() or self.sshconn.cancelled():
+            return
+        try:
+            self.sshconn.result().close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            # A failed connection future has no transport to close.
+            pass
+
+    async def wait_closed(self):
+        """Wait for local tasks and the shared SSH connection to close."""
+        await super().wait_closed()
+        if self.sshconn is None or not self.sshconn.done() or self.sshconn.cancelled():
+            return
+        try:
+            await self.sshconn.result().wait_closed()
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Preserve the cleanup contract when AsyncSSH reports close errors.
+            pass
+
     async def wait_ssh_connection(self, local_addr=None, family=0, tunnel=None):
         """Create or await the shared optional asyncssh connection."""
         if self.sshconn is not None and not self.sshconn.cancelled():
@@ -69,7 +91,20 @@ class ProxySSH(runtime.ProxySimple):
             }
             if self.insecure_host_key:
                 connect_kwargs['known_hosts'] = None
-            conn = await asyncssh.connect(**connect_kwargs)
+            try:
+                conn = await asyncssh.connect(**connect_kwargs)
+            except asyncio.CancelledError:
+                self.sshconn.cancel()
+                self.sshconn = None
+                raise
+            except Exception as exc:
+                self.sshconn.set_exception(exc)
+                # The caller receives the original exception directly. Retrieve
+                # the future exception as well so failed shared handshakes do not
+                # produce an unhandled-future warning.
+                self.sshconn.exception()
+                self.sshconn = None
+                raise
             self.sshconn.set_result(conn)
 
     async def wait_open_connection(self, host, port, local_addr, family, tunnel=None):
