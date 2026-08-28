@@ -1,43 +1,75 @@
-import datetime, zlib, os, binascii, hmac, hashlib, time, random, collections
+"""Optional protocol framing plugins used by cipher connections."""
+
+import binascii
+import collections
+import datetime
+import hashlib
+import hmac
+import os
+import random
+import time
+import zlib
 from . import transport
 from .errors import require
 
-packstr = lambda s, n=2: len(s).to_bytes(n, 'big') + s
-toint = lambda s, o='big': int.from_bytes(s, o)
+# Plugin class names mirror the existing wire-format registry keys.
+# pylint: disable=invalid-name
 
-class BasePlugin(object):
+def packstr(value, size=2):
+    """Prefix bytes with a big-endian length field."""
+    return len(value).to_bytes(size, 'big') + value
+
+
+def toint(value, order='big'):
+    """Decode an integer from a byte string."""
+    return int.from_bytes(value, order)
+
+
+class BasePlugin:
+    """Base interface for optional cipher framing plugins."""
+
+    buf: bytearray
+
     async def init_client_data(self, reader, writer, cipher):
-        pass
+        """Send or consume client-side handshake data when required."""
     async def init_server_data(self, reader, writer, cipher, raddr):
-        pass
+        """Send or consume server-side handshake data when required."""
     def add_cipher(self, cipher):
-        pass
+        """Attach plugin-specific framing callbacks to a cipher session."""
     @classmethod
     def name(cls):
+        """Return the registry name derived from the plugin class name."""
         return cls.__name__.replace('_Plugin', '').replace('__', '.').lower()
 
 class Plain_Plugin(BasePlugin):
-    pass
+    """Plugin that leaves cipher payloads unframed."""
 
 class Origin_Plugin(BasePlugin):
-    pass
+    """Plugin marker for the origin-compatible framing mode."""
 
 class Http_Simple_Plugin(BasePlugin):
+    """Wrap the initial exchange in a simple HTTP-looking handshake."""
+
     async def init_client_data(self, reader, writer, cipher):
+        """Decode the client preamble and send an HTTP response."""
         buf = await transport.read_until(reader, b'\r\n\r\n')
         data = buf.split(b' ')[:2]
         data = bytes.fromhex(data[1][1:].replace(b'%',b'').decode())
         transport.prepend(reader, data)
         writer.write(b'HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Encoding: gzip\r\nContent-Type: text/html\r\nDate: ' + datetime.datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT').encode() + b'\r\nServer: nginx\r\nVary: Accept-Encoding\r\n\r\n')
     async def init_server_data(self, reader, writer, cipher, raddr):
+        """Send an HTTP request-looking preamble to the client."""
         writer.write(f'GET / HTTP/1.1\r\nHost: {raddr}\r\nUser-Agent: curl\r\nAccept-Encoding: gzip, deflate\r\nConnection: keep-alive\r\n\r\n'.encode())
         await transport.read_until(reader, b'\r\n\r\n')
 
 TIMESTAMP_TOLERANCE = 5 * 60
 
 class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
+    """Implement the legacy TLS 1.2 ticket-authentication framing."""
+
     CACHE = collections.deque(maxlen = 100)
     async def init_client_data(self, reader, writer, cipher):
+        """Validate a server preamble and send the client handshake."""
         key = cipher.cipher(cipher.key).key
         require(await transport.read_exactly(reader, 3) == b'\x16\x03\x01')
         header = await transport.read_exactly(reader, toint(await transport.read_exactly(reader, 2)))
@@ -50,17 +82,25 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
         utc_time = int(time.time())
         require(hmac.new(key+sessionid, cacheid, hashlib.sha1).digest()[:10] == header[28:38])
         require(abs(toint(header[6:10]) - utc_time) < TIMESTAMP_TOLERANCE)
-        addhmac = lambda s: s + hmac.new(key+sessionid, s, hashlib.sha1).digest()[:10]
+        def addhmac(data):
+            """Append the ticket-authentication MAC to handshake data."""
+            return data + hmac.new(key+sessionid, data, hashlib.sha1).digest()[:10]
+
         writer.write(addhmac((b"\x16\x03\x03" + packstr(b"\x02\x00" + packstr(b'\x03\x03' + addhmac(utc_time.to_bytes(4, 'big') + os.urandom(18)) + b'\x20' + sessionid + b'\xc0\x2f\x00\x00\x05\xff\x01\x00\x01\x00')) + (b"\x16\x03\x03" + packstr(b"\x04\x00" + packstr(os.urandom(random.randrange(164)*2+64))) if random.randint(0, 8) < 1 else b'') + b"\x14\x03\x03\x00\x01\x01\x16\x03\x03" + packstr(os.urandom(random.choice((32, 40)))))[:-10]))
 
     async def init_server_data(self, reader, writer, cipher, raddr):
+        """Send a server-side TLS-looking handshake preamble."""
         key = cipher.cipher(cipher.key).key
         sessionid = os.urandom(32)
-        addhmac = lambda s: s + hmac.new(key+sessionid, s, hashlib.sha1).digest()[:10]
+        def addhmac(data):
+            """Append the ticket-authentication MAC to handshake data."""
+            return data + hmac.new(key+sessionid, data, hashlib.sha1).digest()[:10]
+
         writer.write(b"\x16\x03\x01" + packstr(b"\x01\x00" + packstr(b'\x03\x03' + addhmac(int(time.time()).to_bytes(4, 'big') + os.urandom(18)) + b"\x20" + sessionid + b"\x00\x1c\xc0\x2b\xc0\x2f\xcc\xa9\xcc\xa8\xcc\x14\xcc\x13\xc0\x0a\xc0\x14\xc0\x09\xc0\x13\x00\x9c\x00\x35\x00\x2f\x00\x0a\x01\x00" + packstr(b"\xff\x01\x00\x01\x00\x00\x00" + packstr(packstr(b"\x00" + packstr(raddr.encode()))) + b"\x00\x17\x00\x00\x00\x23" + packstr(os.urandom((random.randrange(17)+8)*16)) + b"\x00\x0d\x00\x16\x00\x14\x06\x01\x06\x03\x05\x01\x05\x03\x04\x01\x04\x03\x03\x01\x03\x03\x02\x01\x02\x03\x00\x05\x00\x05\x01\x00\x00\x00\x00\x00\x12\x00\x00\x75\x50\x00\x00\x00\x0b\x00\x02\x01\x00\x00\x0a\x00\x06\x00\x04\x00\x17\x00\x18"))))
         writer.write(addhmac(b'\x14\x03\x03\x00\x01\x01\x16\x03\x03\x00\x20' + os.urandom(22)))
 
     def add_cipher(self, cipher):
+        """Install TLS-record extraction and packetization callbacks."""
         self.buf = bytearray()
         def decrypt(s):
             self.buf.extend(s)
@@ -92,7 +132,10 @@ class Tls1__2_Ticket_Auth_Plugin(BasePlugin):
         cipher.pencrypt2 = encrypt
 
 class Verify_Simple_Plugin(BasePlugin):
+    """Add CRC-protected variable-length payload framing."""
+
     def add_cipher(self, cipher):
+        """Install CRC verification and payload framing callbacks."""
         self.buf = bytearray()
         def decrypt(s):
             self.buf.extend(s)
@@ -125,7 +168,10 @@ class Verify_Simple_Plugin(BasePlugin):
         cipher.pencrypt = encrypt
 
 class Verify_Deflate_Plugin(BasePlugin):
+    """Add compressed variable-length payload framing."""
+
     def add_cipher(self, cipher):
+        """Install zlib decompression and compression callbacks."""
         self.buf = bytearray()
         def decrypt(s):
             self.buf.extend(s)
@@ -154,6 +200,7 @@ class Verify_Deflate_Plugin(BasePlugin):
 PLUGIN = {cls.name(): cls for name, cls in globals().items() if name.endswith('_Plugin')}
 
 def get_plugin(plugin_name):
+    """Resolve a plugin name to a fresh plugin instance."""
     if plugin_name not in PLUGIN:
         return f'existing plugins: {sorted(PLUGIN.keys())}', None
     return None, PLUGIN[plugin_name]()

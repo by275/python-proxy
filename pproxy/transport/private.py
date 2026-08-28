@@ -1,5 +1,8 @@
 """Small compatibility boundary for third-party and asyncio private APIs."""
 
+# These helpers intentionally centralize version-sensitive private access.
+# pylint: disable=protected-access
+
 
 def h2_begin_stream(connection, stream_id, weight):
     """Begin an outbound H2 stream through the version-sensitive API."""
@@ -29,6 +32,11 @@ def quic_next_stream_id(connection, is_unidirectional=False):
 def quic_prepare_stream(connection, stream_id):
     """Create the internal aioquic stream state before sending data."""
     return connection._quic._get_or_create_stream_for_send(stream_id)
+
+
+def quic_create_stream(connection, stream_id):
+    """Create an aioquic reader/writer pair through the compatibility boundary."""
+    return connection._create_stream(stream_id)
 
 
 def quic_send_stream_data(connection, stream_id, data, end_stream=False):

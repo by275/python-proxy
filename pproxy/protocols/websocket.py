@@ -14,15 +14,22 @@ from .http import MAX_HTTP_HEADER_SIZE, parse_http_request_head
 
 
 class WS(BaseProtocol):
-    async def guess(self, reader, **kw):
+    """Implement the HTTP upgrade and WebSocket stream adapter."""
+
+    async def guess(self, reader, **kw):  # pylint: disable=unused-argument
+        """Detect the HTTP GET used to start a WebSocket handshake."""
         header = await transport.read(reader, 4)
         transport.rollback(reader, header)
         return header == b'GET '
 
     def patch_ws_stream(self, reader, writer, masked=False, *, on_close=None):
+        """Install WebSocket framing on a pair of asynchronous streams."""
         return websocket.patch_stream(reader, writer, masked, on_close=on_close)
 
-    async def accept(self, reader, user, writer, users, authtable, sock, **kw):
+    async def accept(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,unused-argument
+        self, reader, user, writer, users, authtable, sock, **kw
+    ):
+        """Authenticate and accept a local WebSocket proxy handshake."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, _, _, pauth, sec_websocket_key = parse_http_request_head(lines[:-4])
         urllib.parse.urlparse(path)
@@ -61,7 +68,10 @@ class WS(BaseProtocol):
         host, port = netloc_split(self.param, dst[0], dst[1])
         return user, host, port
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+    # The upstream adapter accepts the local host parameter by contract.
+    # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        """Open a WebSocket tunnel through a compatible upstream proxy."""
         seckey = base64.b64encode(os.urandom(16)).decode()
         writer_remote.write(
             f'GET / HTTP/1.1\r\nHost: {myhost}\r\n'
@@ -95,7 +105,8 @@ class CFP(WS):
             host_name = f'[{host_name}]'
         return f'{host_name}:{port}'
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+    # The CFP handshake keeps the shared upstream callback contract.
+    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         seckey = base64.b64encode(os.urandom(16)).decode()
         target = self._header_value('X-Proxy-Target', self._target(host_name, port))
         myhost = self._header_value('Host', myhost)
@@ -160,9 +171,7 @@ class CFP(WS):
                     await writer_remote.drain()
                     await asyncio.wait_for(close_event.wait(), CFP_CLOSE_TIMEOUT)
                     await writer_remote.drain()
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught  # always perform raw close
                     pass
                 finally:
                     raw_close()

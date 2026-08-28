@@ -1,3 +1,5 @@
+"""Benchmark proxy connection setup and relay behavior."""
+
 import argparse
 import asyncio
 import contextlib

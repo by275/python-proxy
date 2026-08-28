@@ -14,12 +14,15 @@ class ProxySSH(runtime.ProxySimple):
         self.sshconn = None
 
     def logtext(self, host, port):
+        """Format the SSH backend and its jump chain for diagnostics."""
         return f' -> sshtunnel {self.bind}' + self.jump.logtext(host, port)
 
     def patch_stream(self, ssh_reader, writer, host, port):
+        """Bridge an asyncssh channel to the project's stream interface."""
         reader = asyncio.StreamReader()
 
         async def channel():
+            """Forward bytes from the SSH channel into the stream reader."""
             read = ssh_reader.read
             while not ssh_reader.at_eof() and not writer.is_closing():
                 buf = await read(65536)
@@ -34,13 +37,14 @@ class ProxySSH(runtime.ProxySimple):
         return reader, writer
 
     async def wait_ssh_connection(self, local_addr=None, family=0, tunnel=None):
+        """Create or await the shared optional asyncssh connection."""
         if self.sshconn is not None and not self.sshconn.cancelled():
             if not self.sshconn.done():
                 await self.sshconn
         else:
             self.sshconn = asyncio.get_running_loop().create_future()
             try:
-                import asyncssh
+                import asyncssh  # pylint: disable=import-outside-toplevel  # optional backend
             except ImportError as exc:
                 self.sshconn.cancel()
                 self.sshconn = None
@@ -51,24 +55,25 @@ class ProxySSH(runtime.ProxySimple):
                 password = None
             else:
                 client_keys = None
-            connect_kwargs = dict(
-                host=self.host_name,
-                port=self.port,
-                local_addr=local_addr,
-                family=family,
-                x509_trusted_certs=None,
-                username=username,
-                password=password,
-                client_keys=client_keys,
-                keepalive_interval=60,
-                tunnel=tunnel,
-            )
+            connect_kwargs = {
+                'host': self.host_name,
+                'port': self.port,
+                'local_addr': local_addr,
+                'family': family,
+                'x509_trusted_certs': None,
+                'username': username,
+                'password': password,
+                'client_keys': client_keys,
+                'keepalive_interval': 60,
+                'tunnel': tunnel,
+            }
             if self.insecure_host_key:
                 connect_kwargs['known_hosts'] = None
             conn = await asyncssh.connect(**connect_kwargs)
             self.sshconn.set_result(conn)
 
     async def wait_open_connection(self, host, port, local_addr, family, tunnel=None):
+        """Open the selected jump destination over the SSH connection."""
         try:
             await self.wait_ssh_connection(local_addr, family, tunnel)
             conn = self.sshconn.result()
@@ -90,7 +95,9 @@ class ProxySSH(runtime.ProxySimple):
             raise
 
     async def start_server(self, args, stream_handler=runtime.stream_handler, tunnel=None):
-        if type(self.jump) is runtime.ProxyDirect:
+        """Start an SSH-backed listener for the configured jump destination."""
+        # SSH server mode requires a configured jump, not the direct sentinel.
+        if type(self.jump) is runtime.ProxyDirect:  # pylint: disable=unidiomatic-typecheck
             raise ConfigurationError('ssh server mode unsupported')
         await self.wait_ssh_connection(tunnel=tunnel)
         conn = self.sshconn.result()
@@ -98,7 +105,9 @@ class ProxySSH(runtime.ProxySimple):
             return await self.jump.start_server(args, stream_handler, conn)
 
         def handler(host, port):
+            """Build a stream handler for one remote destination."""
             def handler_stream(reader, writer):
+                """Bridge an accepted stream before invoking the proxy handler."""
                 reader, writer = self.patch_stream(reader, writer, host, port)
                 return stream_handler(reader, writer, **vars(self.jump), **args)
 

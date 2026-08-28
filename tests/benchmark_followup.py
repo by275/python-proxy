@@ -165,8 +165,8 @@ def time_task_group_cancellation(loops):
 
 
 def time_statistics_callbacks(loops):
-    def modstat(user, remote_ip, host):
-        def update(amount):
+    def modstat(_user, _remote_ip, _host):
+        def update(_amount):
             return None
 
         return update
@@ -199,12 +199,12 @@ class MessageReader:
     def __init__(self):
         self.messages = 0
 
-    def feed_data(self, data):
+    def feed_data(self, _data):
         self.messages += 1
 
 
 class MessageWriter:
-    def write(self, data):
+    def write(self, _data):
         return None
 
 

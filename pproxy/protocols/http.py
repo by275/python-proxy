@@ -1,7 +1,6 @@
 """HTTP parsing helpers and HTTP-family protocol implementations."""
 
 import base64
-import asyncio
 import re
 import urllib.parse
 
@@ -17,10 +16,15 @@ MAX_HTTP_HEADER_SIZE = HTTP_HEADER_LIMIT
 
 
 def _decode_header_value(value):
+    """Decode an HTTP header byte string using the wire-compatible encoding."""
     return value.decode('latin1')
 
 
+decode_header_value = _decode_header_value
+
+
 def parse_http_request_head(data):
+    """Parse an HTTP request head and remove proxy-only headers."""
     request_line, *header_lines = data.split(b'\r\n')
     match = HTTP_METHOD_LINE.match(request_line)
     if match is None:
@@ -53,6 +57,7 @@ def parse_http_request_head(data):
 
 
 def decode_http_header_block(header_block):
+    """Return a mapping and text representation for an HTTP header block."""
     header_lines = header_block.split(b'\r\n') if header_block else ()
     headers = {}
     for line in header_lines:
@@ -63,21 +68,28 @@ def decode_http_header_block(header_block):
 
 
 async def drain_if_needed(writer, force=False):
+    """Drain a writer when a response must be flushed before closing."""
     if force:
         await writer.drain()
 
 
 class HTTP(BaseProtocol):
-    async def guess(self, reader, **kw):
+    """Implement HTTP/1 proxy request parsing and CONNECT tunneling."""
+
+    async def guess(self, reader, **kw):  # pylint: disable=unused-argument
+        """Detect whether the initial bytes look like an HTTP request."""
         header = await transport.read(reader, 4)
         transport.rollback(reader, header)
         return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
 
     async def accept(self, reader, user, writer, **kw):
+        """Read and dispatch one HTTP request from a local client."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
         method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
 
-        async def reply(code, message, body=None, wait=False):
+        async def reply(  # pylint: disable=unused-argument
+            code, message, body=None, wait=False
+        ):
             writer.write(message)
             if body:
                 writer.write(body)
@@ -97,7 +109,7 @@ class HTTP(BaseProtocol):
             **kw,
         )
 
-    async def http_accept(
+    async def http_accept(  # pylint: disable=unused-argument,too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         user,
         method,
@@ -113,16 +125,17 @@ class HTTP(BaseProtocol):
         httpget=None,
         **kw,
     ):
+        """Authenticate and translate an HTTP request into a target action."""
         url = urllib.parse.urlparse(path)
         if method == 'GET' and not url.hostname:
-            for path, text in (httpget.items() if httpget else ()):
-                if path == url.path:
+            for payload_path, text in (httpget.items() if httpget else ()):
+                if payload_path == url.path:
                     user = next(filter(lambda x: x.decode() == url.query, users), None) if users else True
                     if user:
                         if users:
                             authtable.set_authed(user)
-                        if type(text) is str:
-                            text = (text % dict(host=host)).encode()
+                        if isinstance(text, str):
+                            text = (text % {'host': host}).encode()
                         await reply(
                             200,
                             f'{ver} 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nCache-Control: max-age=900\r\nContent-Length: {len(text)}\r\n\r\n'.encode(),
@@ -157,6 +170,7 @@ class HTTP(BaseProtocol):
         return user, host_name, port, connected
 
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
+        """Open an HTTP CONNECT tunnel through the remote proxy."""
         writer_remote.write(
             f'CONNECT {host_name}:{port} HTTP/1.1\r\nHost: {host_name}:{port}'.encode()
             + (b'\r\nProxy-Authorization: Basic ' + base64.b64encode(rauth) if rauth else b'')
@@ -164,7 +178,8 @@ class HTTP(BaseProtocol):
         )
         await transport.read_until(reader_remote, b'\r\n\r\n')
 
-    async def http_channel(self, reader, writer, stat_bytes, stat_conn):
+    async def http_channel(self, reader, writer, stat_bytes, stat_conn):  # pylint: disable=too-many-locals
+        """Forward HTTP requests while rewriting absolute request targets."""
         normal_eof = reader.at_eof()
         try:
             stat_conn(1)
@@ -189,8 +204,6 @@ class HTTP(BaseProtocol):
                 if pending_drain >= DRAIN_BUFFER_SIZE:
                     await writer.drain()
                     pending_drain = 0
-        except asyncio.CancelledError:
-            raise
         except (ConnectionError, OSError, EOFError):
             pass
         finally:
@@ -199,13 +212,18 @@ class HTTP(BaseProtocol):
 
 
 class HTTPOnly(HTTP):
+    """Adapt an HTTP-only upstream into the common proxy interface."""
+
+    # The upstream adapter accepts the local host parameter by contract.
+    # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,unused-argument
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+        """Rewrite the first upstream request before forwarding it."""
         buffer = bytearray()
         host_name_pattern = re.compile(br'\r\nHost: ([^\r\n]+)\r\n', re.I)
 
         def write(data, o=writer_remote.write):
             if not data:
-                return
+                return None
             buffer.extend(data)
             pos = buffer.find(b'\r\n\r\n')
             if pos != -1:
@@ -225,21 +243,28 @@ class HTTPOnly(HTTP):
                 )
                 buffer.clear()
                 return o(data)
+            return None
 
         writer_remote.write = write
 
 
 class H2(HTTP):
-    async def guess(self, reader, **kw):
+    """Implement the HTTP/2 request and tunnel adapter."""
+
+    async def guess(self, reader, **kw):  # pylint: disable=unused-argument
+        """Identify an already-negotiated HTTP/2 stream."""
         return True
 
     async def accept(self, reader, user, writer, **kw):
+        """Read HTTP/2 headers and dispatch them like an HTTP request."""
         if not writer.headers.done():
             await writer.headers
         headers = writer.headers.result()
         headers = {i.decode().lower(): j.decode() for i, j in headers}
         lines = '\r\n'.join(i for i in headers if not i.startswith('proxy-') and not i.startswith(':'))
 
+        # Keep the common HTTP reply callback shape for the protocol interface.
+        # pylint: disable=unused-argument
         async def reply(code, message, body=None, wait=False):
             writer.send_headers(((':status', str(code)),))
             if body:
@@ -260,7 +285,10 @@ class H2(HTTP):
             **kw,
         )
 
+    # The upstream adapter accepts the local host parameter by contract.
+    # pylint: disable=arguments-differ,too-many-arguments,too-many-positional-arguments,unused-argument
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
+        """Send a CONNECT request on an HTTP/2 upstream stream."""
         headers = [(':method', 'CONNECT'), (':authority', f'{host_name}:{port}')]
         if rauth:
             headers.append(('proxy-authorization', 'Basic ' + base64.b64encode(rauth)))
@@ -268,17 +296,22 @@ class H2(HTTP):
 
 
 class H3(H2):
-    pass
+    """Reuse the HTTP/2 request adapter for HTTP/3-compatible streams."""
 
 
 class HTTPAdmin(HTTP):
+    """Handle authenticated local HTTP administration requests."""
+
     MAX_HEADER_SIZE = 32 * 1024
 
-    async def accept(self, reader, user, writer, **kw):
+    async def accept(self, reader, user, writer, **kw):  # pylint: disable=too-many-locals
+        """Authenticate, bound, and dispatch one administration request."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=self.MAX_HEADER_SIZE)
         method, path, ver, filtered_headers, _, proxy_authorization, _ = parse_http_request_head(lines[:-4])
         headers, lines = decode_http_header_block(filtered_headers)
 
+        # Keep the common HTTP reply callback shape for the protocol interface.
+        # pylint: disable=unused-argument
         async def reply(code, message, body=None, wait=False):
             writer.write(message)
             if body:
@@ -318,8 +351,8 @@ class HTTPAdmin(HTTP):
         if url.hostname is not None:
             raise RequestError('HTTP Admin Unsupported hostname')
         if method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
-            for path, handler in admin.httpget.items():
-                if path == url.path:
+            for payload_path, handler in admin.httpget.items():
+                if payload_path == url.path:
                     await handler(reply=reply, ver=ver, method=method, headers=headers, lines=lines, content=content)
                     raise ConnectionClosed()
             raise RequestError(f'404 {method} {url.path}')

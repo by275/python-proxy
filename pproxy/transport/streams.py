@@ -1,5 +1,9 @@
 """Compatibility helpers for asyncio stream operations."""
 
+# The rollback fallback supports StreamReader implementations without a public
+# prepend API, so accessing its private buffer is intentionally isolated here.
+# pylint: disable=protected-access
+
 import asyncio
 from typing import Any
 
@@ -50,9 +54,7 @@ async def close_writer(writer: Any, graceful: bool = False) -> None:
             try:
                 await graceful_close()
                 return
-            except asyncio.CancelledError:
-                raise
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught  # fall back to hard close
                 pass
     try:
         writer.close()

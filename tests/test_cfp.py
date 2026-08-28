@@ -1,6 +1,5 @@
 """Contract tests for the authenticated worker WebSocket protocol."""
 
-import asyncio
 import base64
 import hashlib
 import re
@@ -15,7 +14,7 @@ class FakeReader:
         self.response_factory = response_factory
         self.received = bytearray()
 
-    async def readuntil(self, separator):
+    async def readuntil(self, _separator):
         return self.response_factory()
 
     def feed_data(self, data):
@@ -39,7 +38,7 @@ class FakeWriter:
     def is_closing(self):
         return self.closed
 
-    def get_extra_info(self, key):
+    def get_extra_info(self, _key):
         return None
 
 
@@ -109,7 +108,9 @@ class CFPHandshakeTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(options=options):
                 writer = FakeWriter()
-                reader = FakeReader(lambda: response_for(writer, **options))
+                reader = FakeReader(
+                    lambda writer=writer, options=options: response_for(writer, **options)
+                )
                 with self.assertRaises(ProtocolError):
                     await proto.CFP(None).connect(
                         reader,

@@ -1,3 +1,5 @@
+"""Test transport adapters and stream ownership behavior."""
+
 import asyncio
 import unittest
 

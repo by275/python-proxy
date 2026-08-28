@@ -18,12 +18,14 @@ class TaskRegistry(set):
         *,
         name: str | None = None,
     ) -> asyncio.Task[Any]:
+        """Create, track, and automatically forget one asyncio task."""
         task = asyncio.create_task(awaitable, name=name)
         self.add(task)
         task.add_done_callback(self.discard)
         return task
 
     def cancel_all(self) -> None:
+        """Request cancellation for every task currently being tracked."""
         for task in tuple(self):
             task.cancel()
 

@@ -18,10 +18,10 @@ def xor_mask_bytes(data, mask_key):
     return bytes(masked)
 
 
-class WebSocketStream:
+class WebSocketStream:  # pylint: disable=too-many-instance-attributes
     """Adapt a byte stream to bounded binary WebSocket messages."""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         reader,
         writer,
@@ -52,6 +52,7 @@ class WebSocketStream:
         self.close_sent = False
 
     def _fail(self, message):
+        """Close the stream and raise a protocol error for invalid input."""
         self.closed = True
         close = getattr(self.writer, 'close', None)
         if close is not None:
@@ -59,6 +60,7 @@ class WebSocketStream:
         raise ProtocolError(message)
 
     def write_frame(self, opcode, payload=b''):
+        """Encode and write one bounded WebSocket frame."""
         payload_length = len(payload)
         if payload_length > self.max_frame_size:
             raise ProtocolError('WebSocket frame exceeds configured limit')
@@ -79,6 +81,7 @@ class WebSocketStream:
         return self.raw_write(bytes([0x80 | opcode]) + second + payload)
 
     def _emit_message(self, payload):
+        """Append a frame payload and emit a completed message."""
         if len(self.message_buffer) + len(payload) > self.max_message_size:
             self._fail('WebSocket message exceeds configured limit')
         self.message_buffer.extend(payload)
@@ -89,6 +92,7 @@ class WebSocketStream:
             self.on_message(message)
 
     def _handle_frame(self, payload):
+        """Dispatch a decoded frame to data, control, or close handling."""
         if self.opcode == 0:
             if self.message_opcode is None:
                 self._fail('unexpected WebSocket continuation frame')
@@ -111,7 +115,8 @@ class WebSocketStream:
         else:
             self._fail('unknown WebSocket opcode')
 
-    def feed_data(self, data):
+    def feed_data(self, data):  # pylint: disable=too-many-branches
+        """Decode as many complete WebSocket frames as the buffer contains."""
         if self.closed:
             return
         self.buffer.extend(data)
@@ -166,8 +171,9 @@ class WebSocketStream:
         return self
 
     def write(self, data):
+        """Write application data as one binary WebSocket message."""
         if not data:
-            return
+            return None
         return self.write_frame(2, data)
 
 

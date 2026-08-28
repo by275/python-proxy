@@ -1,5 +1,6 @@
 """Shared helpers for server construction and connection setup."""
 
+import random
 import re
 import time
 from typing import Any, Callable
@@ -9,7 +10,11 @@ from ..errors import ConfigurationError
 
 
 SOCKET_TIMEOUT = transport.DEFAULT_TIMEOUT
-DUMMY = lambda value: value
+
+
+def DUMMY(value):  # pylint: disable=invalid-name  # public identity callback
+    """Return a payload unchanged when no plugin transform is configured."""
+    return value
 
 
 class AuthTable:
@@ -22,10 +27,13 @@ class AuthTable:
         self._user = {}
 
     def authed(self):
+        """Return the cached user when its authentication window is valid."""
         if time.time() - self._auth.get(self.remote_ip, 0) <= self.authtime:
             return self._user[self.remote_ip]
+        return None
 
     def set_authed(self, user):
+        """Cache a successfully authenticated user for this remote address."""
         self._auth[self.remote_ip] = time.time()
         self._user[self.remote_ip] = user
 
@@ -47,7 +55,9 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
 
 def schedule(rserver, salgorithm, host_name, port):
     """Select an available remote according to the configured algorithm."""
-    filter_cond = lambda option: option.alive and option.match_rule(host_name, port)
+    def filter_cond(option):
+        """Return whether one remote is alive and matches the request."""
+        return option.alive and option.match_rule(host_name, port)
     if salgorithm == 'fa':
         return next(filter(filter_cond, rserver), None)
     if salgorithm == 'rr':
@@ -56,8 +66,6 @@ def schedule(rserver, salgorithm, host_name, port):
                 rserver.append(rserver.pop(index))
                 return option
     if salgorithm == 'rc':
-        import random
-
         options = [option for option in rserver if filter_cond(option)]
         return random.choice(options) if options else None
     if salgorithm == 'lc':
@@ -69,7 +77,7 @@ def compile_rule(filename: str) -> Callable[[str], Any]:
     """Compile an inline rule or a newline-delimited rule file."""
     if filename.startswith("{") and filename.endswith("}"):
         return re.compile(filename[1:-1]).match
-    with open(filename) as rule_file:
+    with open(filename, encoding='utf-8') as rule_file:
         return re.compile(
             '(:?' + ''.join(
                 '|'.join(item.strip() for item in rule_file if item.strip() and not item.startswith('#'))

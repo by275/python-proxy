@@ -1,3 +1,5 @@
+"""Package metadata and source-tree version discovery."""
+
 import subprocess
 from pathlib import Path
 
@@ -18,7 +20,7 @@ def _git_version(root):
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError):
         return None
     dirty = description.endswith('-dirty')
     if dirty:
@@ -41,10 +43,10 @@ def _source_version():
     if not (root / '.git').exists():
         return None
     try:
-        from setuptools_scm import get_version
+        from setuptools_scm import get_version  # pylint: disable=import-outside-toplevel
 
         return get_version(root=root)
-    except Exception:
+    except (ImportError, LookupError, OSError, RuntimeError, ValueError):
         return _git_version(root)
 
 

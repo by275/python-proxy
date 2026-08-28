@@ -18,9 +18,10 @@ from .errors import (
 ProxyFactory = Callable[[str], Any]
 RuleFactory = Callable[[str], Callable[[str], Any]]
 
-Connection: ProxyFactory = server.proxies_by_uri
-Server: ProxyFactory = server.proxies_by_uri
-Rule: RuleFactory = server.compile_rule
+# These capitalized aliases are part of the historical public facade.
+Connection: ProxyFactory = server.proxies_by_uri  # pylint: disable=invalid-name
+Server: ProxyFactory = server.proxies_by_uri  # pylint: disable=invalid-name
+Rule: RuleFactory = server.compile_rule  # pylint: disable=invalid-name
 DIRECT = server.DIRECT
 
 __all__ = [

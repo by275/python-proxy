@@ -109,13 +109,14 @@ class UdpLeakSmokeTests(unittest.TestCase):
             original = loop.create_datagram_endpoint
 
             class DatagramTransport:
-                def sendto(self, data):
+                def sendto(self, _data):
                     return None
 
                 def close(self):
                     return None
 
             async def create_datagram_endpoint(factory, remote_addr):
+                del remote_addr  # The production call supplies this keyword; the fake does not need it.
                 protocol = factory()
                 protocol.connection_made(DatagramTransport())
                 protocol.datagram_received(b"upstream reply", ("198.51.100.10", 53))

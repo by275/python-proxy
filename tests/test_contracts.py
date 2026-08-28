@@ -1,3 +1,5 @@
+"""Test public protocol and transport interface contracts."""
+
 import asyncio
 import io
 import socket

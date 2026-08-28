@@ -56,6 +56,34 @@ jobs:
           pproxy tests
           --select E9,F821
 
+      - name: Gate selected Pylint correctness messages
+        run: >-
+          python -m pylint
+          --persistent=no
+          --reports=no
+          --score=no
+          --disable=all
+          --enable=E0102,W0640
+          pproxy tests
+
+      - name: Report Pylint production findings
+        run: >-
+          python -m pylint
+          --persistent=no
+          --reports=no
+          --score=no
+          --exit-zero
+          pproxy
+
+      - name: Report Pylint test and benchmark findings
+        run: >-
+          python -m pylint
+          --persistent=no
+          --reports=no
+          --score=no
+          --exit-zero
+          tests
+
       - name: Run proxy-level setup smoke benchmark
         run: python tests/benchmark_setup.py --connections 10
 

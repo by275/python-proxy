@@ -13,7 +13,57 @@ from .common import AuthTable, DUMMY, prepare_ciphers, schedule
 from .connections import DIRECT
 
 
-async def stream_handler(
+async def _open_upstream(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    roption,
+    host_name,
+    port,
+    local_addr,
+    lbind,
+    client_connected,
+):
+    """Open, prepare, and probe one selected upstream connection."""
+    try:
+        reader_remote, writer_remote = await roption.open_connection(
+            host_name, port, local_addr, lbind
+        )
+    except asyncio.TimeoutError as exc:
+        raise UpstreamError(f'Connection timeout {roption.bind}') from exc
+    try:
+        reader_remote, writer_remote = await roption.prepare_connection(
+            reader_remote, writer_remote, host_name, port
+        )
+        use_http = (await client_connected(writer_remote)) if client_connected else None
+    except (ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError, ProtocolError) as exc:
+        writer_remote.close()
+        raise UpstreamError('Unknown remote protocol') from exc
+    return reader_remote, writer_remote, use_http
+
+
+async def _relay_stream(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    lproto,
+    reader,
+    writer,
+    reader_remote,
+    writer_remote,
+    user,
+    remote_ip,
+    host_name,
+    roption,
+    use_http,
+    modstat,
+):
+    """Relay one prepared client stream through the selected upstream."""
+    m = modstat(user, remote_ip, host_name)
+    lchannel = lproto.http_channel if use_http else lproto.channel
+    from ..relay import relay_with_taskgroup  # pylint: disable=import-outside-toplevel  # avoid handler cycle
+
+    await relay_with_taskgroup(
+        lproto.channel(reader_remote, writer, m(2 + roption.direct), m(4 + roption.direct)),
+        lchannel(reader, writer_remote, m(roption.direct), roption.connection_change),
+    )
+
+
+async def stream_handler(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements
     reader,
     writer,
     unix,
@@ -62,35 +112,29 @@ async def stream_handler(
         else:
             roption = schedule(rserver, salgorithm, host_name, port) or DIRECT
             verbose(f'{lproto.name} {remote_text}{roption.logtext(host_name, port)}')
-            try:
-                reader_remote, writer_remote = await roption.open_connection(host_name, port, local_addr, lbind)
-            except asyncio.TimeoutError as exc:
-                raise UpstreamError(f'Connection timeout {roption.bind}') from exc
-            try:
-                reader_remote, writer_remote = await roption.prepare_connection(
-                    reader_remote, writer_remote, host_name, port
-                )
-                use_http = (await client_connected(writer_remote)) if client_connected else None
-            except (ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError, ProtocolError) as exc:
-                writer_remote.close()
-                raise UpstreamError('Unknown remote protocol') from exc
-            m = modstat(user, remote_ip, host_name)
-            lchannel = lproto.http_channel if use_http else lproto.channel
-            from ..relay import relay_with_taskgroup
-
-            await relay_with_taskgroup(
-                lproto.channel(reader_remote, writer, m(2 + roption.direct), m(4 + roption.direct)),
-                lchannel(reader, writer_remote, m(roption.direct), roption.connection_change),
+            reader_remote, writer_remote, use_http = await _open_upstream(
+                roption, host_name, port, local_addr, lbind, client_connected
             )
-    except asyncio.CancelledError:
-        raise
+            await _relay_stream(
+                lproto,
+                reader,
+                writer,
+                reader_remote,
+                writer_remote,
+                user,
+                remote_ip,
+                host_name,
+                roption,
+                use_http,
+                modstat,
+            )
     except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
         if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
         if debug:
             raise
     # Keep the service boundary alive for backend-specific unexpected errors.
-    except Exception as ex:
+    except Exception as ex:  # pylint: disable=broad-exception-caught  # isolate one client from service lifetime
         verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')
         if debug:
             raise
@@ -101,7 +145,7 @@ async def stream_handler(
             pass
 
 
-async def datagram_handler(
+async def datagram_handler(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     writer,
     data,
     addr,
@@ -119,7 +163,7 @@ async def datagram_handler(
         remote_ip, remote_port, *_ = addr
         remote_text = f'{remote_ip}:{remote_port}'
         data = cipher.datagram.decrypt(data) if cipher else data
-        lproto, user, host_name, port, data = proto.udp_accept(
+        lproto, _user, host_name, port, data = proto.udp_accept(
             protos, data, sock=writer.get_extra_info('socket'), **kwargs
         )
         if host_name == 'echo':
@@ -138,11 +182,9 @@ async def datagram_handler(
                 writer.sendto(cipher.datagram.encrypt(rdata) if cipher else rdata, addr)
 
             await roption.udp_open_connection(host_name, port, data, addr, reply)
-    except asyncio.CancelledError:
-        raise
     except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
         if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
     # Keep the datagram service alive for backend-specific unexpected errors.
-    except Exception as ex:
+    except Exception as ex:  # pylint: disable=broad-exception-caught  # isolate one datagram from service lifetime
         verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')

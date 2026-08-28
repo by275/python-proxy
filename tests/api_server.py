@@ -1,3 +1,5 @@
+"""Run a small manual API server example."""
+
 import asyncio
 import pproxy
 

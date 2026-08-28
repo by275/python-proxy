@@ -1,3 +1,5 @@
+"""Test optional HTTP/2, QUIC, and SSH adapter availability."""
+
 import unittest
 
 from pproxy import server

@@ -1,3 +1,5 @@
+"""Benchmark HTTP header parsing and serialization."""
+
 import argparse
 import asyncio
 import base64
@@ -31,7 +33,7 @@ class AcceptReader:
         self.payload = payload
         self._buffer = bytearray()
 
-    async def read_until(self, sep):
+    async def read_until(self, _sep):
         return self.payload
 
     def feed_data(self, data):
@@ -43,13 +45,13 @@ class ChannelReader:
         self.payload = payload
         self.sent = False
 
-    async def read(self, size):
+    async def read(self, _size):
         if self.sent:
             return b""
         self.sent = True
         return self.payload
 
-    async def readuntil(self, sep):
+    async def readuntil(self, _sep):
         return b""
 
     def at_eof(self):

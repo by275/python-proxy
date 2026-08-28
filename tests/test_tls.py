@@ -1,3 +1,5 @@
+"""Test TLS stream setup and certificate handling."""
+
 import asyncio
 import unittest
 

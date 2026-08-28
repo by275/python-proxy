@@ -7,6 +7,7 @@ from ..errors import ProtocolError
 
 
 async def socks_address_stream(reader, n):
+    """Read a SOCKS address and port from an asynchronous byte stream."""
     if n in (1, 17):
         data = await transport.read_exactly(reader, 4)
         host_name = socket.inet_ntoa(data)
@@ -25,6 +26,7 @@ async def socks_address_stream(reader, n):
 
 
 def socks_address(reader, n):
+    """Read a SOCKS address and port from a synchronous byte buffer."""
     return socket.inet_ntoa(reader.read(4)) if n == 1 else \
            reader.read(reader.read(1)[0]).decode() if n == 3 else \
            socket.inet_ntop(socket.AF_INET6, reader.read(16)), \
