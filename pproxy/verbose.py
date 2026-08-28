@@ -34,7 +34,7 @@ class ConnectionStat:
         return self.updaters[index]
 
 def all_stat_other(stats):
-    cmd = sys.stdin.readline()
+    _cmd = sys.stdin.readline()
     all_stat(stats)
 
 def all_stat(stats):
@@ -89,7 +89,7 @@ def setup(loop, args):
     args.modstat = modstat
     def win_readline(handler):
         while True:
-            line = sys.stdin.readline()
+            _line = sys.stdin.readline()
             handler()
     if args.v >= 2:
         loop.create_task(realtime_stat(args.stats[0]))

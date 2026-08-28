@@ -241,7 +241,7 @@ class GCMCipher(AEADCipher):
         self.cipher = self.CIPHER.new(self.key)
         self.hkey = []
         x = int.from_bytes(self.cipher.encrypt(0), 'big')
-        for i in range(128):
+        for _ in range(128):
             self.hkey.insert(0, x)
             x = (x>>1)^(0xe1<<120) if x&1 else x>>1
     def process(self, s, tag=None):

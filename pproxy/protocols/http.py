@@ -117,13 +117,13 @@ class HTTP(BaseProtocol):
     ):
         url = urllib.parse.urlparse(path)
         if method == 'GET' and not url.hostname:
-            for path, text in (httpget.items() if httpget else ()):
-                if path == url.path:
+            for payload_path, text in (httpget.items() if httpget else ()):
+                if payload_path == url.path:
                     user = next(filter(lambda x: x.decode() == url.query, users), None) if users else True
                     if user:
                         if users:
                             authtable.set_authed(user)
-                        if type(text) is str:
+                        if isinstance(text, str):
                             text = (text % {'host': host}).encode()
                         await reply(
                             200,
@@ -319,8 +319,8 @@ class HTTPAdmin(HTTP):
         if url.hostname is not None:
             raise RequestError('HTTP Admin Unsupported hostname')
         if method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
-            for path, handler in admin.httpget.items():
-                if path == url.path:
+            for payload_path, handler in admin.httpget.items():
+                if payload_path == url.path:
                     await handler(reply=reply, ver=ver, method=method, headers=headers, lines=lines, content=content)
                     raise ConnectionClosed()
             raise RequestError(f'404 {method} {url.path}')

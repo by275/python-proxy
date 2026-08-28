@@ -76,7 +76,9 @@ class Pf(Transparent):
                 )
             )
             if self.pf is None:
-                self.pf = open('/dev/pf', 'a+b')
+                self.pf = open(  # pylint: disable=consider-using-with  # handle remains open for the adapter
+                    '/dev/pf', 'a+b'
+                )
             fcntl.ioctl(self.pf.fileno(), 0xc0544417, pnl)
             return socket.inet_ntop(sock.family, pnl[48:48 + len(src_ip)]), int.from_bytes(pnl[76:78], 'big')
         except (OSError, ValueError, AssertionError):

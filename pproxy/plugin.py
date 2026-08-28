@@ -16,6 +16,8 @@ packstr = lambda s, n=2: len(s).to_bytes(n, 'big') + s
 toint = lambda s, o='big': int.from_bytes(s, o)
 
 class BasePlugin(object):
+    buf: bytearray
+
     async def init_client_data(self, reader, writer, cipher):
         pass
     async def init_server_data(self, reader, writer, cipher, raddr):
