@@ -9,23 +9,31 @@ from .base import BaseProtocol
 
 
 class SSH(BaseProtocol):
+    """Protocol marker for SSH-managed direct connections."""
+
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, myhost, **kw):
-        pass
+        """Leave connection setup to the SSH transport layer."""
 
 
 class Transparent(BaseProtocol):
+    """Resolve the destination from a locally accepted socket."""
+
     def query_remote(self, sock):
+        """Return the destination endpoint associated with a local socket."""
         raise NotImplementedError(f'{self.name} must implement query_remote()')
 
     async def guess(self, reader, sock, **kw):
+        """Check whether the socket has a usable transparent destination."""
         remote = self.query_remote(sock)
         return remote is not None and (sock is None or sock.getsockname() != remote)
 
     async def accept(self, reader, user, sock, **kw):
+        """Return the transparent destination for a TCP client."""
         remote = self.query_remote(sock)
         return user, remote[0], remote[1]
 
     def udp_accept(self, data, sock, **kw):
+        """Return the transparent destination for a UDP datagram."""
         remote = self.query_remote(sock)
         return True, remote[0], remote[1], data
 
@@ -35,6 +43,8 @@ SOL_IPV6 = 41
 
 
 class Redir(Transparent):
+    """Resolve destinations through Linux REDIRECT socket metadata."""
+
     def query_remote(self, sock):
         try:
             # if sock.family == socket.AF_INET:
@@ -51,11 +61,14 @@ class Redir(Transparent):
 
 
 class Pf(Transparent):
+    """Resolve destinations through the BSD PF divert socket."""
+
     def __init__(self, param):
         super().__init__(param)
         self.pf = None
 
     def query_remote(self, sock):
+        """Query PF for the original destination of a redirected socket."""
         try:
             import fcntl  # pylint: disable=import-outside-toplevel  # BSD-only standard library
 
@@ -87,19 +100,26 @@ class Pf(Transparent):
 
 
 class Tunnel(Transparent):
+    """Use the configured endpoint instead of socket-derived metadata."""
+
     def query_remote(self, sock):
+        """Return the configured tunnel endpoint."""
         if not self.param:
             return 'tunnel', 0
         dst = sock.getsockname() if sock else (None, None)
         return config.netloc_split(self.param, dst[0], dst[1])
 
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
-        pass
+        """Leave tunnel setup to the surrounding connection handler."""
 
     def udp_connect(self, rauth, host_name, port, data, **kw):
+        """Pass through a UDP payload for the configured tunnel."""
         return data
 
 
 class Echo(Transparent):
+    """Resolve all transparent traffic to the local echo endpoint."""
+
     def query_remote(self, sock):
+        """Return the sentinel endpoint used for echo traffic."""
         return 'echo', 0

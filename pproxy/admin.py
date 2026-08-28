@@ -9,10 +9,16 @@ MAX_ADMIN_BODY = ADMIN_BODY_LIMIT
 
 
 async def reply_http(reply, ver, code, content):
-    await reply(code, f'{ver} {code}\r\nConnection: close\r\nContent-Type: text/plain\r\nCache-Control: max-age=900\r\nContent-Length: {len(content)}\r\n\r\n'.encode(), content, True)
+    """Write a complete plain-text HTTP response through a protocol callback."""
+    headers = (
+        f'{ver} {code}\r\nConnection: close\r\nContent-Type: text/plain\r\n'
+        f'Cache-Control: max-age=900\r\nContent-Length: {len(content)}\r\n\r\n'
+    )
+    await reply(code, headers.encode(), content, True)
 
 
 async def status_handler(reply, **kwarg):
+    """Return the administration endpoint health status."""
     method = kwarg.get('method')
     if method == 'GET':
         data = {"status": "ok"}
@@ -22,6 +28,7 @@ async def status_handler(reply, **kwarg):
 
 
 async def configs_handler(reply, **kwarg):
+    """Read or schedule supported runtime configuration actions."""
     method = kwarg.get('method')
     ver = kwarg.get('ver')
 
