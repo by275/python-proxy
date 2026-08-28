@@ -44,29 +44,37 @@ class ProxyDirect:
 
     @property
     def direct(self):
+        """Return whether this is the unconfigured direct strategy."""
         return type(self) is ProxyDirect
 
     def logtext(self, host, port):
+        """Format the destination suffix used in connection diagnostics."""
         return '' if host == 'tunnel' else f' -> {host}:{port}'
 
     def match_rule(self, host, port):
+        """Return whether this strategy accepts the destination."""
         return True
 
     def connection_change(self, delta):
+        """Apply a connection-count delta to the strategy."""
         self.connections += delta
 
     def udp_packet_unpack(self, data):
+        """Decode a received UDP packet before delivering it to the client."""
         return data
 
     def destination(self, host, port):
+        """Return the remote endpoint used for a new UDP association."""
         return host, port
 
     def udp_touch(self, addr, prot):
+        """Mark a UDP association as recently used."""
         self.udpmap[addr] = prot
         self.udp_lru[addr] = prot
         self.udp_lru.move_to_end(addr)
 
     def udp_discard(self, addr):
+        """Remove and return a UDP association by client address."""
         self.udp_lru.pop(addr, None)
         prot = self.udpmap.pop(addr, None)
         if prot is not None:
@@ -74,6 +82,7 @@ class ProxyDirect:
         return prot
 
     def udp_evict_if_needed(self):
+        """Evict the least-recently-used UDP association at the limit."""
         if len(self.udp_lru) < UDP_LIMIT:
             return
         addr = next(iter(self.udp_lru))
@@ -82,16 +91,21 @@ class ProxyDirect:
             prot.transport.close()
 
     async def udp_open_connection(self, host, port, data, addr, reply):
+        """Open or reuse one remote UDP association for a client address."""
         owner = self
         client_addr = addr
 
         class Protocol(asyncio.DatagramProtocol):
+            """Forward datagrams for one remote UDP association."""
+
             def __init__(self, data):
+                """Buffer the first packet until the datagram transport opens."""
                 self.databuf = [data]
                 self.transport = None
                 owner.udp_touch(client_addr, self)
 
             def connection_made(self, transport):  # pylint: disable=redefined-outer-name  # asyncio callback signature
+                """Send buffered packets after the datagram transport opens."""
                 self.transport = transport
                 for data in self.databuf:
                     transport.sendto(data)
@@ -99,6 +113,7 @@ class ProxyDirect:
                 owner.udp_touch(client_addr, self)
 
             def new_data_arrived(self, data):
+                """Forward a new client datagram to the remote endpoint."""
                 if self.transport:
                     self.transport.sendto(data)
                 else:
@@ -106,12 +121,14 @@ class ProxyDirect:
                 owner.udp_touch(client_addr, self)
 
             def datagram_received(self, data, addr):
+                """Deliver a remote datagram to the local client callback."""
                 del addr
                 data = owner.udp_packet_unpack(data)
                 reply(data)
                 owner.udp_touch(client_addr, self)
 
             def connection_lost(self, exc):
+                """Remove the association after the remote transport closes."""
                 del exc
                 owner.udp_discard(client_addr)
 
@@ -121,12 +138,16 @@ class ProxyDirect:
         else:
             self.connection_change(1)
             self.udp_evict_if_needed()
-            protocol_factory = lambda: Protocol(data)
+            def protocol_factory():
+                """Create the association protocol with its first packet."""
+                return Protocol(data)
+
             remote = self.destination(host, port)
             loop = asyncio.get_running_loop()
             await loop.create_datagram_endpoint(protocol_factory, remote_addr=remote)
 
     def close(self):
+        """Request shutdown of all TCP, UDP, and tracked task resources."""
         self.task_registry.cancel_all()
         for writer in tuple(self.writers):
             writer.close()
@@ -135,9 +156,11 @@ class ProxyDirect:
                 prot.transport.close()
 
     async def wait_closed(self):
+        """Wait until tasks owned by this strategy have finished."""
         await self.task_registry.wait_closed()
 
     async def aclose(self):
+        """Close resources and wait for asynchronous cleanup to finish."""
         self.close()
         await self.wait_closed()
 
@@ -148,12 +171,15 @@ class ProxyDirect:
         await self.aclose()
 
     def udp_prepare_connection(self, host, port, data):
+        """Prepare a UDP payload before protocol-specific framing."""
         return data
 
     async def wait_open_connection(self, host, port, local_addr, family):
+        """Open a direct TCP stream with the requested local binding."""
         return await asyncio.open_connection(host=host, port=port, local_addr=local_addr, family=family)
 
     async def open_connection(self, host, port, local_addr, lbind, timeout=SOCKET_TIMEOUT):
+        """Resolve binding settings and open a timeout-bounded TCP stream."""
         local_addr = (
             local_addr if self.lbind == 'in' else (self.lbind, 0) if self.lbind else
             local_addr if lbind == 'in' else (lbind, 0) if lbind else None
@@ -164,9 +190,11 @@ class ProxyDirect:
         return reader, writer
 
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
+        """Apply backend-specific stream preparation before protocol framing."""
         return reader_remote, writer_remote
 
     async def tcp_connect(self, host, port, local_addr=None, lbind=None):
+        """Open and prepare one outbound TCP connection."""
         reader, writer = await self.open_connection(host, port, local_addr, lbind)
         try:
             reader, writer = await self.prepare_connection(reader, writer, host, port)
@@ -180,6 +208,7 @@ class ProxyDirect:
         return reader, writer
 
     async def udp_sendto(self, host, port, data, answer_cb, local_addr=None):
+        """Send one UDP payload through a managed remote association."""
         if local_addr is None:
             local_addr = random.randrange(2**32)
         data = self.udp_prepare_connection(host, port, data)
@@ -211,27 +240,34 @@ class ProxySimple(ProxyDirect):
         self.udp_inflight = 0
 
     def logtext(self, host, port):
+        """Format this proxy strategy and its jump chain for diagnostics."""
         return f' -> {self.rproto.name+("+ssl" if self.sslclient else "")} {self.bind}' + self.jump.logtext(host, port)
 
     def match_rule(self, host, port):
+        """Return whether the configured destination rule permits a request."""
         return (self.rule is None) or self.rule(host) or self.rule(str(port))
 
     @property
     def rproto(self):
+        """Return the protocol used by the first upstream hop."""
         return self.protos[0]
 
     @property
     def auth(self):
+        """Return the first configured upstream authentication value."""
         return self.users[0] if self.users else b''
 
     def udp_packet_unpack(self, data):
+        """Decrypt and unwrap a UDP response from the upstream chain."""
         data = self.cipher.datagram.decrypt(data) if self.cipher else data
         return self.jump.udp_packet_unpack(self.rproto.udp_unpack(data))
 
     def destination(self, host, port):
+        """Return the configured upstream endpoint."""
         return self.host_name, self.port
 
     def udp_prepare_connection(self, host, port, data):
+        """Apply jump, protocol, and cipher framing to a UDP payload."""
         data = self.jump.udp_prepare_connection(host, port, data)
         whost, wport = self.jump.destination(host, port)
         data = self.rproto.udp_connect(rauth=self.auth, host_name=whost, port=wport, data=data)
@@ -240,17 +276,22 @@ class ProxySimple(ProxyDirect):
         return data
 
     async def udp_start_server(self, args):
+        """Start the UDP listener for this configured proxy strategy."""
         from .handlers import datagram_handler
 
         owner = self
 
         class Protocol(asyncio.DatagramProtocol):
+            """Limit and schedule datagram handling for one UDP listener."""
+
             transport = None
 
             def connection_made(self, transport):  # pylint: disable=redefined-outer-name  # asyncio callback signature
+                """Store the listener transport used by datagram handlers."""
                 self.transport = transport
 
             def datagram_received(self, data, addr):
+                """Schedule one bounded datagram handler task."""
                 if owner.udp_inflight >= UDP_TASK_LIMIT:
                     return
                 owner.udp_inflight += 1
@@ -267,11 +308,13 @@ class ProxySimple(ProxyDirect):
         return await loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
 
     async def wait_open_connection(self, host, port, local_addr, family):
+        """Open either the configured Unix or TCP upstream endpoint."""
         if self.unix:
             return await asyncio.open_unix_connection(path=self.bind)
         return await asyncio.open_connection(host=self.host_name, port=self.port, local_addr=local_addr, family=family)
 
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
+        """Apply TLS, cipher, protocol, and jump preparation in order."""
         reader_remote, writer_remote = proto.sslwrap(
             reader_remote,
             writer_remote,
@@ -295,12 +338,14 @@ class ProxySimple(ProxyDirect):
         return await self.jump.prepare_connection(reader_remote, writer_remote, host, port)
 
     async def start_server(self, args, stream_handler=None):
+        """Start a TCP or Unix listener with tracked client writers."""
         if stream_handler is None:
             from .handlers import stream_handler
 
         handler = functools.partial(stream_handler, **vars(self), **args)
 
         async def tracked_handler(reader, writer):
+            """Track one accepted writer for coordinated shutdown."""
             self.writers.add(writer)
             try:
                 await handler(reader, writer)
@@ -334,6 +379,7 @@ class ProxyBackward(ProxySimple):
         self.conn = asyncio.Queue()
 
     async def watch_connection(self, reader, writer):
+        """Monitor one reverse-tunnel connection until it closes."""
         try:
             data = await transport.read(reader, 1, timeout=None)
             if data:
@@ -345,6 +391,7 @@ class ProxyBackward(ProxySimple):
                 writer.close()
 
     async def wait_open_connection(self, *args):
+        """Return the next healthy connection supplied by a reverse tunnel."""
         while True:
             reader, writer, watcher = await self.conn.get()
             watcher.cancel()
@@ -355,6 +402,7 @@ class ProxyBackward(ProxySimple):
             writer.close()
 
     def close(self):
+        """Stop reconnect loops and close all reverse-tunnel writers."""
         self.closed = True
         if hasattr(self.tasks, 'cancel_all'):
             self.tasks.cancel_all()
@@ -368,6 +416,7 @@ class ProxyBackward(ProxySimple):
                 pass
 
     async def wait_closed(self):
+        """Wait for reverse-tunnel tasks and clear the task collection."""
         if hasattr(self.tasks, 'wait_closed'):
             await self.tasks.wait_closed()
         else:
@@ -377,10 +426,12 @@ class ProxyBackward(ProxySimple):
             self.tasks.clear()
 
     async def aclose(self):
+        """Close reverse-tunnel resources and wait for their tasks."""
         self.close()
         await self.wait_closed()
 
     async def start_server(self, args, stream_handler=None):
+        """Start the configured number of reverse outbound connections."""
         if stream_handler is None:
             from .handlers import stream_handler
 
@@ -390,6 +441,7 @@ class ProxyBackward(ProxySimple):
         return self
 
     async def start_server_run(self, handler):
+        """Maintain one outbound reverse-tunnel connection until shutdown."""
         errwait = 0
         while not self.closed:
             wait = self.backward.open_connection(self.host_name, self.port, self.lbind, None)
@@ -426,7 +478,9 @@ class ProxyBackward(ProxySimple):
                     errwait = min(errwait * 1.3 + 0.1, 30)
 
     def start_backward_client(self, args):
+        """Start the listener that receives reverse-tunnel connections."""
         async def handler(reader, writer, **kw):
+            """Authenticate and enqueue one reverse-tunnel client."""
             auth = self.server.auth
             if getattr(self.server, 'quicserver', None) is not None:
                 auth = b'\x01' + auth
