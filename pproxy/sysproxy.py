@@ -6,8 +6,11 @@ import sys
 
 from .errors import require
 
-class MacSetting:
+class MacSetting:  # pylint: disable=too-few-public-methods
+    """Manage the selected macOS system proxy setting."""
+
     def __init__(self, args):
+        """Select a supported listener and enable its macOS proxy modes."""
         self.device = None
         self.listen = None
         self.modes = None
@@ -42,16 +45,20 @@ class MacSetting:
             subprocess.check_call(['/usr/sbin/networksetup', mode, self.device, 'localhost', str(self.listen.port), 'off'])
         print(f'System proxy setting -> {self.mode_name} localhost:{self.listen.port}')
     def clear(self):
+        """Disable the proxy modes previously enabled by this instance."""
         if self.device is None:
             return
         for mode in self.modes:
             subprocess.check_call(['/usr/sbin/networksetup', mode+'state', self.device, 'off'])
         print('System proxy setting -> off')
 
-class WindowsSetting:
+class WindowsSetting:  # pylint: disable=too-few-public-methods
+    """Manage the selected Windows system proxy registry value."""
+
     KEY = r'Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections'
     SUBKEY = 'DefaultConnectionSettings'
     def __init__(self, args):
+        """Select a supported listener and update Windows proxy settings."""
         self.listen = None
         for option in args.listen:
             protos = [x.name for x in option.protos]
@@ -73,6 +80,7 @@ class WindowsSetting:
         winreg.SetValueEx(key, self.SUBKEY, None, regtype, value)
         winreg.CloseKey(key)
     def clear(self):
+        """Restore the Windows proxy registry value to its disabled state."""
         if self.listen is None:
             return
         import winreg  # pylint: disable=import-error,import-outside-toplevel  # Windows-only standard library
@@ -85,6 +93,7 @@ class WindowsSetting:
         winreg.CloseKey(key)
 
 def setup(args):
+    """Apply platform-specific system proxy integration when supported."""
     if sys.platform == 'darwin':
         return MacSetting(args)
     if sys.platform == 'win32':
