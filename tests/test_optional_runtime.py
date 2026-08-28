@@ -93,19 +93,29 @@ class H2LoopbackTests(unittest.IsolatedAsyncioTestCase):
 
         echo_server = await asyncio.start_server(echo, "127.0.0.1", 0)
         echo_port = echo_server.sockets[0].getsockname()[1]
-        listener = server.proxies_by_uri("h2+http://127.0.0.1:0")
+        listener = server.proxies_by_uri("h2+http://127.0.0.1:0/#user:secret")
         handler = await listener.start_server({"rserver": [], "verbose": lambda *_: None})
         proxy_port = handler.sockets[0].getsockname()[1]
-        client = server.proxies_by_uri(f"h2+http://127.0.0.1:{proxy_port}")
+        client = server.proxies_by_uri(f"h2+http://127.0.0.1:{proxy_port}/#user:secret")
         try:
-            reader, writer = await asyncio.wait_for(
-                client.tcp_connect("127.0.0.1", echo_port),
-                5,
-            )
-            writer.write(b"h2-smoke")
-            await writer.drain()
-            self.assertEqual(await asyncio.wait_for(reader.readexactly(8), 5), b"h2-smoke")
-            writer.close()
+            for index in range(3):
+                reader, writer = await asyncio.wait_for(
+                    client.tcp_connect("127.0.0.1", echo_port),
+                    5,
+                )
+                payload = (
+                    f"h2-smoke-{index}".encode()
+                    if index < 2
+                    else b"h2-flow-control-" * 8192
+                )
+                writer.write(payload)
+                await writer.drain()
+                self.assertEqual(
+                    await asyncio.wait_for(reader.readexactly(len(payload)), 5),
+                    payload,
+                )
+                writer.close()
+                await asyncio.sleep(0.02)
         finally:
             client.close()
             listener.close()
@@ -173,11 +183,13 @@ async def quic_fixture(protocol_name):
         cert_path, key_path, certificate_data = _write_quic_certificate(directory)
         echo_server = await asyncio.start_server(echo, '127.0.0.1', 0)
         echo_port = echo_server.sockets[0].getsockname()[1]
-        listener = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:0')
+        listener = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:0/#user:secret')
         listener.quicserver.load_cert_chain(cert_path, key_path)
         handler = await listener.start_server({'rserver': [], 'verbose': lambda *_: None})
         proxy_port = handler._transport.get_extra_info('sockname')[1]  # pylint: disable=protected-access
-        client = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:{proxy_port}')
+        client = server.proxies_by_uri(
+            f'{protocol_name}+http://127.0.0.1:{proxy_port}/#user:secret'
+        )
         client.quicclient.load_verify_locations(cadata=certificate_data)
         try:
             yield client, listener, handler, echo_server, echo_port
@@ -203,7 +215,11 @@ class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
                             client.tcp_connect('127.0.0.1', echo_port),
                             5,
                         )
-                        payload = f'{protocol_name}-smoke-{index}'.encode()
+                        payload = (
+                            f'{protocol_name}-smoke-{index}'.encode()
+                            if index < 2
+                            else f'{protocol_name}-flow-control-'.encode() * 8192
+                        )
                         writer.write(payload)
                         await writer.drain()
                         self.assertEqual(
