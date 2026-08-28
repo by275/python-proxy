@@ -24,7 +24,7 @@ def netloc_split(
 
 
 @dataclass(frozen=True, slots=True)
-class ProxyConfig:
+class ProxyConfig:  # pylint: disable=too-many-instance-attributes
     """Configuration shared by the proxy implementations."""
 
     jump: Any

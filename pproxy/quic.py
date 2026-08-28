@@ -23,12 +23,13 @@ from .transport.private import (
 )
 
 
-class ProxyQUIC(runtime.ProxySimple):
+class ProxyQUIC(runtime.ProxySimple):  # pylint: disable=too-many-instance-attributes
     """Proxy backend for QUIC streams using the optional ``aioquic`` package."""
 
     MAX_UDP_FLOWS = UDP_LIMIT
 
     def __init__(self, quicserver, quicclient, **kw):
+        """Initialize QUIC server/client configuration and connection state."""
         super().__init__(**kw)
         self.quicserver = quicserver
         self.quicclient = quicclient
@@ -41,7 +42,9 @@ class ProxyQUIC(runtime.ProxySimple):
         self.quic_udp_replies = {}
 
     def patch_writer(self, writer):
+        """Adapt a QUIC stream writer to the asyncio stream contract."""
         async def drain():
+            """Flush pending QUIC frames to the network."""
             quic_protocol(writer).transmit()
 
         remote_addr = quic_network_address(quic_protocol(writer))
@@ -73,7 +76,8 @@ class ProxyQUIC(runtime.ProxySimple):
         self.quic_udpmap.clear()
         self.quic_udp_replies.clear()
 
-    async def _run_quic_connection(self, create_protocol, handshake):
+    async def _run_quic_connection(self, create_protocol, handshake):  # pylint: disable=too-many-branches
+        """Own one aioquic context and publish its lifecycle to waiters."""
         import aioquic.asyncio
 
         context: Any = aioquic.asyncio.connect(
@@ -159,6 +163,7 @@ class ProxyQUIC(runtime.ProxySimple):
                 self._quic_waiters -= 1
 
     def close(self):
+        """Close the active QUIC protocol or cancel its connection task."""
         super().close()
         if self.quic_protocol is not None:
             self.quic_protocol.close()
@@ -166,14 +171,19 @@ class ProxyQUIC(runtime.ProxySimple):
             self._quic_connection_task.cancel()
 
     async def wait_quic_connection(self):
+        """Return a live QUIC connection, creating it when necessary."""
         import aioquic.asyncio
         import aioquic.quic.events
 
         owner = self
 
         def protocol_factory(handshake):
+            """Create a protocol that routes QUIC events to this backend."""
             class Protocol(aioquic.asyncio.QuicConnectionProtocol):
+                """Receive QUIC events for one shared connection."""
+
                 def quic_event_received(self, event):
+                    """Dispatch control and UDP stream events."""
                     if isinstance(event, aioquic.quic.events.ConnectionTerminated):
                         owner.connection_terminated(handshake, 'QUIC connection terminated')
                     elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in owner.quic_udp_replies:
@@ -201,7 +211,8 @@ class ProxyQUIC(runtime.ProxySimple):
         quic_send_stream_data(conn, stream_id, data, False)
         conn.transmit()
 
-    async def wait_open_connection(self, *args):
+    async def wait_open_connection(self, *args):  # pylint: disable=unused-argument
+        """Open one bidirectional stream on a live QUIC connection."""
         conn = await self.wait_quic_connection()
         stream_id = quic_next_stream_id(conn, False)
         quic_prepare_stream(conn, stream_id)
@@ -210,13 +221,17 @@ class ProxyQUIC(runtime.ProxySimple):
         return reader, writer
 
     async def udp_start_server(self, args):
+        """Start a QUIC listener that exposes incoming streams as datagrams."""
         import aioquic.asyncio
         import aioquic.quic.events
 
         owner = self
 
         class Protocol(aioquic.asyncio.QuicConnectionProtocol):
+            """Dispatch incoming QUIC stream data to datagram handlers."""
+
             def quic_event_received(self, event):
+                """Convert incoming stream events into proxy datagram tasks."""
                 if isinstance(event, aioquic.quic.events.StreamDataReceived):
                     stream_id = event.stream_id
                     addr = ('quic ' + owner.bind, stream_id)
@@ -239,6 +254,7 @@ class ProxyQUIC(runtime.ProxySimple):
         ), None
 
     async def start_server(self, args, stream_handler=runtime.stream_handler):
+        """Start a QUIC listener for the configured stream handler."""
         import aioquic.asyncio
 
         def handler(reader, writer):
@@ -257,6 +273,7 @@ class ProxyH3(ProxyQUIC):
     """Proxy backend for HTTP/3 streams using the optional ``aioquic`` package."""
 
     def get_stream(self, conn, stream_id):
+        """Create an asyncio-like HTTP/3 reader and writer pair."""
         from aioquic.h3.connection import FrameUnexpected
 
         owner = self
@@ -264,27 +281,35 @@ class ProxyH3(ProxyQUIC):
         reader = asyncio.StreamReader()
 
         class StreamWriter:
+            """Expose one HTTP/3 stream through the asyncio writer surface."""
+
             def __init__(self):
+                """Initialize stream state and the request-header future."""
                 self.closed = False
                 self.headers = asyncio.get_running_loop().create_future()
 
             def get_extra_info(self, key):
+                """Return the synthetic peer or socket address."""
                 return {"peername": remote_addr, "sockname": remote_addr}.get(key)
 
             def write(self, data):
+                """Send HTTP/3 DATA frames for this stream."""
                 if self.closed or quic_is_closed(conn):
                     return
                 conn.http.send_data(stream_id, data, False)
                 conn.transmit()
 
             async def drain(self):
+                """Flush pending HTTP/3 frames."""
                 if not self.closed and not quic_is_closed(conn):
                     conn.transmit()
 
             def is_closing(self):
+                """Return whether this HTTP/3 stream has been closed."""
                 return self.closed
 
             def close(self):
+                """Close the HTTP/3 stream and remove its owner state."""
                 if not self.closed:
                     self.closed = True
                     owner.writers.discard(self)
@@ -298,6 +323,7 @@ class ProxyH3(ProxyQUIC):
                     conn.streams.pop(stream_id, None)
 
             def send_headers(self, headers):
+                """Send encoded response headers for this stream."""
                 if self.closed or quic_is_closed(conn):
                     return
                 conn.http.send_headers(stream_id, [(key.encode(), value.encode()) for key, value in headers])
@@ -308,6 +334,7 @@ class ProxyH3(ProxyQUIC):
         return reader, writer
 
     def get_protocol(self, server_side=False, handler=None, handshake=None):
+        """Build an aioquic protocol class for HTTP/3 client or server mode."""
         import aioquic.asyncio
         import aioquic.h3.connection
         import aioquic.h3.events
@@ -316,12 +343,16 @@ class ProxyH3(ProxyQUIC):
         owner = self
 
         class Protocol(aioquic.asyncio.QuicConnectionProtocol):
+            """Translate QUIC and HTTP/3 events into stream callbacks."""
+
             def __init__(self, *args, **kw):
+                """Initialize the HTTP/3 connection and stream registry."""
                 super().__init__(*args, **kw)
                 self.http = aioquic.h3.connection.H3Connection(quic_connection(self))
                 self.streams = {}
 
             def quic_event_received(self, event):
+                """Handle connection termination and forward HTTP/3 events."""
                 if isinstance(event, aioquic.quic.events.ConnectionTerminated):
                     if not server_side:
                         owner.connection_terminated(handshake, 'HTTP/3 connection terminated')
@@ -335,6 +366,7 @@ class ProxyH3(ProxyQUIC):
                         self.http_event_received(http_event)
 
             def http_event_received(self, event):
+                """Create, feed, and close proxy streams from HTTP/3 events."""
                 if isinstance(event, aioquic.h3.events.HeadersReceived):
                     if event.stream_id not in self.streams and server_side:
                         if len(self.streams) >= owner.MAX_UDP_FLOWS:
@@ -343,6 +375,7 @@ class ProxyH3(ProxyQUIC):
                         writer.headers.set_result(event.headers)
 
                         async def handle_stream():
+                            """Run the configured handler for one HTTP/3 stream."""
                             try:
                                 await handler(reader, writer)
                             finally:
@@ -359,6 +392,7 @@ class ProxyH3(ProxyQUIC):
                     self.close_stream(event.stream_id)
 
             def open_stream(self, stream_id=None):
+                """Create and register an HTTP/3 stream pair."""
                 if stream_id is None:
                     stream_id = quic_next_stream_id(self, False)
                     quic_prepare_stream(self, stream_id)
@@ -367,6 +401,7 @@ class ProxyH3(ProxyQUIC):
                 return reader, writer
 
             def close_stream(self, stream_id):
+                """Forget an HTTP/3 stream after both sides finish."""
                 if stream_id in self.streams:
                     reader, writer = self.streams[stream_id]
                     if reader.at_eof() or writer.is_closing():
@@ -375,14 +410,17 @@ class ProxyH3(ProxyQUIC):
         return Protocol
 
     async def wait_h3_connection(self):
+        """Return a live HTTP/3 protocol connection."""
         return await self._wait_for_quic_connection(
             lambda future: self.get_protocol(handshake=future),
         )
 
     async def wait_open_connection(self, *args):
+        """Open one HTTP/3 bidirectional stream."""
         return (await self.wait_h3_connection()).open_stream()
 
     async def start_server(self, args, stream_handler=runtime.stream_handler):
+        """Start an HTTP/3 listener for the configured stream handler."""
         import aioquic.asyncio
 
         return await aioquic.asyncio.serve(

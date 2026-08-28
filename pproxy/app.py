@@ -54,21 +54,34 @@ def _load_http_payloads(args):
             args.httpget[path] = file.read()
 
 
+def _cipher_label(option, include_plugins=False):
+    """Format an optional cipher and, when requested, its plugin names."""
+    if not option.cipher:
+        return ''
+    suffix = ''
+    if include_plugins and option.cipher.plugins:
+        suffix = ' ' + ','.join(plugin.name() for plugin in option.cipher.plugins)
+    return f'({option.cipher.name}{suffix})'
+
+
 def _print_tcp_server(option, bind=None):
     """Print the address and protocol set for a TCP listener."""
     if runtime.is_unauthenticated_wildcard(option):
         print('WARNING: wildcard listener has no authentication; use loopback or configure credentials')
-    print('Serving on', (bind or option.bind), 'by', ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else ''), '({}{})'.format(option.cipher.name, ' ' + ','.join(i.name() for i in option.cipher.plugins) if option.cipher and option.cipher.plugins else '') if option.cipher else '')
+    protocols = ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else '')
+    print('Serving on', (bind or option.bind), 'by', protocols, _cipher_label(option, include_plugins=True))
 
 
 def _print_udp_server(option, bind=None):
     """Print the address and protocol set for a UDP listener."""
-    print('Serving on UDP', (bind or option.bind), 'by', ','.join(i.name for i in option.protos), f'({option.cipher.name})' if option.cipher else '')
+    protocols = ','.join(i.name for i in option.protos)
+    print('Serving on UDP', (bind or option.bind), 'by', protocols, _cipher_label(option))
 
 
 def _print_backward_server(option, bind=None):
     """Print the address and protocol set for a backward listener."""
-    print('Serving on', (bind or option.bind), 'backward by', ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else ''), '({}{})'.format(option.cipher.name, ' ' + ','.join(i.name() for i in option.cipher.plugins) if option.cipher and option.cipher.plugins else '') if option.cipher else '')
+    protocols = ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else '')
+    print('Serving on', (bind or option.bind), 'backward by', protocols, _cipher_label(option, include_plugins=True))
 
 
 def _start_tcp_servers(loop, args, servers):
@@ -127,7 +140,7 @@ def _shutdown_servers(loop, servers):
     loop.run_until_complete(loop.shutdown_asyncgens())
 
 
-def main(args=None):
+def main(args=None):  # pylint: disable=too-many-branches  # CLI lifecycle has independent modes
     """Parse CLI arguments, start configured servers, and own shutdown."""
     origin_argv = sys.argv[1:] if args is None else args
 
