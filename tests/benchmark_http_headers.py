@@ -1,3 +1,5 @@
+"""Benchmark HTTP header parsing and serialization."""
+
 import argparse
 import asyncio
 import base64

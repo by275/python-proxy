@@ -1,3 +1,5 @@
+"""Test cipher registry selection and packet cipher behavior."""
+
 import unittest
 
 from pproxy.cipher import PacketCipher, get_cipher

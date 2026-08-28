@@ -1,3 +1,5 @@
+"""Test proxy configuration parsing and validation."""
+
 import unittest
 
 from pproxy.config import ProxyConfig

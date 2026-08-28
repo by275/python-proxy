@@ -1,3 +1,5 @@
+"""Test public proxy exception types and error formatting."""
+
 import unittest
 
 from pproxy.errors import (

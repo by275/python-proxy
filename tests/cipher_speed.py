@@ -1,3 +1,5 @@
+"""Measure pure-Python and accelerated cipher throughput."""
+
 import os
 import sys
 import time

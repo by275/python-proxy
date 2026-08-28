@@ -1,3 +1,5 @@
+"""Verify cipher round trips and serialized compatibility vectors."""
+
 import os
 import pickle
 import sys

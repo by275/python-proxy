@@ -1,3 +1,5 @@
+"""Test WebSocket protocol parsing and framing behavior."""
+
 import asyncio
 import unittest
 

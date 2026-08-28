@@ -1,3 +1,5 @@
+"""Test server startup, shutdown, and task lifecycle behavior."""
+
 import asyncio
 import unittest
 

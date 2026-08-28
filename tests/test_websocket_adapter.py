@@ -1,3 +1,5 @@
+"""Test the WebSocket stream adapter and frame helpers."""
+
 import unittest
 
 from pproxy.errors import ProtocolError
