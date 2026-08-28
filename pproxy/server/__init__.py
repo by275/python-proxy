@@ -44,12 +44,15 @@ relay_with_taskgroup = relay.relay_with_taskgroup
 
 def main(args=None):
     """Compatibility wrapper for the command-line application."""
-    from ..app import main as app_main
+    from ..app import main as app_main  # pylint: disable=import-outside-toplevel
 
     return app_main(args)
 
 
 # Optional adapters remain available through their historical server aliases.
+# These imports intentionally remain after the facade definitions to avoid
+# importing the facade while optional adapters import it as ``runtime``.
+# pylint: disable=wrong-import-position
 from ..h2 import ProxyH2
 from ..quic import ProxyH3, ProxyQUIC
 from ..ssh import ProxySSH

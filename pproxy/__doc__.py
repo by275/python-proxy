@@ -43,7 +43,7 @@ def _source_version():
     if not (root / '.git').exists():
         return None
     try:
-        from setuptools_scm import get_version
+        from setuptools_scm import get_version  # pylint: disable=import-outside-toplevel
 
         return get_version(root=root)
     except (ImportError, LookupError, OSError, RuntimeError, ValueError):

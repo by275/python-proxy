@@ -1,5 +1,8 @@
 """Connection and listener lifecycle objects used by the server facade."""
 
+# Handler imports stay local to avoid the server facade/handler import cycle.
+# pylint: disable=import-outside-toplevel
+
 import asyncio
 import collections
 import contextlib

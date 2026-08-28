@@ -1,5 +1,6 @@
 """Shared helpers for server construction and connection setup."""
 
+import random
 import re
 import time
 from typing import Any, Callable
@@ -57,8 +58,6 @@ def schedule(rserver, salgorithm, host_name, port):
                 rserver.append(rserver.pop(index))
                 return option
     if salgorithm == 'rc':
-        import random
-
         options = [option for option in rserver if filter_cond(option)]
         return random.choice(options) if options else None
     if salgorithm == 'lc':

@@ -57,7 +57,7 @@ class Pf(Transparent):
 
     def query_remote(self, sock):
         try:
-            import fcntl
+            import fcntl  # pylint: disable=import-outside-toplevel  # BSD-only standard library
 
             src = sock.getpeername()
             dst = sock.getsockname()

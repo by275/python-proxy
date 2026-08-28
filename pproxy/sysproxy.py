@@ -62,7 +62,7 @@ class WindowsSetting:
                 break
         if self.listen is None:
             print('No server listen on localhost by http')
-        import winreg  # pylint: disable=import-error  # Windows-only standard library
+        import winreg  # pylint: disable=import-error,import-outside-toplevel  # Windows-only standard library
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
         value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
         require(regtype == winreg.REG_BINARY)
@@ -75,7 +75,7 @@ class WindowsSetting:
     def clear(self):
         if self.listen is None:
             return
-        import winreg  # pylint: disable=import-error  # Windows-only standard library
+        import winreg  # pylint: disable=import-error,import-outside-toplevel  # Windows-only standard library
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
         value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
         require(regtype == winreg.REG_BINARY)

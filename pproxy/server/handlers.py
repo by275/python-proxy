@@ -76,7 +76,7 @@ async def stream_handler(
                 raise UpstreamError('Unknown remote protocol') from exc
             m = modstat(user, remote_ip, host_name)
             lchannel = lproto.http_channel if use_http else lproto.channel
-            from ..relay import relay_with_taskgroup
+            from ..relay import relay_with_taskgroup  # pylint: disable=import-outside-toplevel  # avoid handler cycle
 
             await relay_with_taskgroup(
                 lproto.channel(reader_remote, writer, m(2 + roption.direct), m(4 + roption.direct)),

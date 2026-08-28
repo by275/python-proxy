@@ -1,5 +1,9 @@
 """QUIC and HTTP/3 optional transport adapters."""
 
+# aioquic is optional and its imports must remain inside the selected runtime
+# paths so importing the core package does not require HTTP/3 dependencies.
+# pylint: disable=import-outside-toplevel
+
 import asyncio
 import functools
 from typing import Any

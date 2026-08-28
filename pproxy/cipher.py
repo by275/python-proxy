@@ -1,5 +1,9 @@
 """Cipher factories and stream/datagram cipher adapters."""
 
+# Accelerated and pure-Python cipher maps are loaded lazily to keep the core
+# installation independent of optional crypto packages.
+# pylint: disable=import-outside-toplevel
+
 import copy
 import os
 import hashlib

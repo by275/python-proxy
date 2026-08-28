@@ -166,7 +166,7 @@ def main(args=None):
     _start_servers(loop, args, servers)
     if servers:
         if args.sys:
-            from . import sysproxy
+            from . import sysproxy  # pylint: disable=import-outside-toplevel
 
             args.sys = sysproxy.setup(args)
         if args.alived > 0 and args.rserver:

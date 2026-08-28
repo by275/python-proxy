@@ -40,7 +40,7 @@ class ProxySSH(runtime.ProxySimple):
         else:
             self.sshconn = asyncio.get_running_loop().create_future()
             try:
-                import asyncssh
+                import asyncssh  # pylint: disable=import-outside-toplevel  # optional backend
             except ImportError as exc:
                 self.sshconn.cancel()
                 self.sshconn = None
