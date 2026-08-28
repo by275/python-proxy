@@ -20,6 +20,9 @@ def _decode_header_value(value):
     return value.decode('latin1')
 
 
+decode_header_value = _decode_header_value
+
+
 def parse_http_request_head(data):
     request_line, *header_lines = data.split(b'\r\n')
     match = HTTP_METHOD_LINE.match(request_line)

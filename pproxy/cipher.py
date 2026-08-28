@@ -19,6 +19,7 @@ class BaseCipher:
     key: bytes
     ota: bool
     iv: bytes | None
+    stream_buffer: bytes
 
     def setup(self):
         """Initialize the backend cipher after the IV has been selected."""
@@ -36,6 +37,7 @@ class BaseCipher:
             self.key = key
         self.ota = ota
         self.iv = None
+        self.stream_buffer = b''
     def setup_iv(self, iv=None):
         self.iv = os.urandom(self.IV_LENGTH) if iv is None else iv
         self.setup()
@@ -263,18 +265,17 @@ class StreamCipherAdapter:
         self.pencrypt2 = pencrypt2
         self.reader_cipher = cipher(key, ota=ota)
         self.writer_cipher = cipher(key, ota=ota)
-        self.reader_cipher._buffer = b''
         self._raw_read = reader.feed_data
         self._raw_write = writer.write
 
     def decrypt(self, data):
         data = self.pdecrypt2(data)
         if not self.reader_cipher.iv:
-            data = self.reader_cipher._buffer + data
+            data = self.reader_cipher.stream_buffer + data
             if len(data) >= self.reader_cipher.IV_LENGTH:
                 self.reader_cipher.setup_iv(data[:self.reader_cipher.IV_LENGTH])
                 return self.pdecrypt(self.reader_cipher.decrypt(data[self.reader_cipher.IV_LENGTH:]))
-            self.reader_cipher._buffer = data
+            self.reader_cipher.stream_buffer = data
             return b''
         return self.pdecrypt(self.reader_cipher.decrypt(data))
 

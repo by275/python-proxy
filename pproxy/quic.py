@@ -2,11 +2,13 @@
 
 import asyncio
 import functools
+from typing import Any
 
 from . import server as runtime
 from .runtime import UDP_LIMIT
 from .transport.private import (
     quic_connection,
+    quic_create_stream,
     quic_force_closed,
     quic_is_closed,
     quic_network_address,
@@ -56,7 +58,7 @@ class ProxyQUIC(runtime.ProxySimple):
         writer.close = close
         self.writers.add(writer)
 
-    def _connection_terminated(self, handshake, message):
+    def connection_terminated(self, handshake, message):
         """Fail the active handshake and discard state for a dead QUIC path."""
         if self.handshake is handshake:
             if handshake is not None and not handshake.done():
@@ -70,7 +72,7 @@ class ProxyQUIC(runtime.ProxySimple):
     async def _run_quic_connection(self, create_protocol, handshake):
         import aioquic.asyncio
 
-        context = aioquic.asyncio.connect(
+        context: Any = aioquic.asyncio.connect(
             self.host_name,
             self.port,
             create_protocol=create_protocol,
@@ -81,7 +83,7 @@ class ProxyQUIC(runtime.ProxySimple):
         protocol = None
         entered = False
         try:
-            protocol = await context.__aenter__()
+            protocol = await context.__aenter__()  # pylint: disable=no-member  # aioquic async context manager
             entered = True
             self.quic_protocol = protocol
             protocol.transmit()
@@ -107,7 +109,7 @@ class ProxyQUIC(runtime.ProxySimple):
             if self.quic_egress_acm is context:
                 self.quic_egress_acm = None
             if entered:
-                await context.__aexit__(None, None, None)
+                await context.__aexit__(None, None, None)  # pylint: disable=no-member  # aioquic async context manager
             if self.handshake is handshake:
                 self.handshake = None
             if self._quic_connection_task is asyncio.current_task():
@@ -169,7 +171,7 @@ class ProxyQUIC(runtime.ProxySimple):
             class Protocol(aioquic.asyncio.QuicConnectionProtocol):
                 def quic_event_received(self, event):
                     if isinstance(event, aioquic.quic.events.ConnectionTerminated):
-                        owner._connection_terminated(handshake, 'QUIC connection terminated')
+                        owner.connection_terminated(handshake, 'QUIC connection terminated')
                     elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in owner.quic_udp_replies:
                         owner.quic_udp_replies[event.stream_id](owner.udp_packet_unpack(event.data))
                         return
@@ -199,7 +201,7 @@ class ProxyQUIC(runtime.ProxySimple):
         conn = await self.wait_quic_connection()
         stream_id = quic_next_stream_id(conn, False)
         quic_prepare_stream(conn, stream_id)
-        reader, writer = conn._create_stream(stream_id)
+        reader, writer = quic_create_stream(conn, stream_id)
         self.patch_writer(writer)
         return reader, writer
 
@@ -318,7 +320,7 @@ class ProxyH3(ProxyQUIC):
             def quic_event_received(self, event):
                 if isinstance(event, aioquic.quic.events.ConnectionTerminated):
                     if not server_side:
-                        owner._connection_terminated(handshake, 'HTTP/3 connection terminated')
+                        owner.connection_terminated(handshake, 'HTTP/3 connection terminated')
                     for reader, writer in tuple(self.streams.values()):
                         reader.feed_eof()
                         writer.close()

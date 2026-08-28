@@ -1,5 +1,9 @@
 """Compatibility helpers for asyncio stream operations."""
 
+# The rollback fallback supports StreamReader implementations without a public
+# prepend API, so accessing its private buffer is intentionally isolated here.
+# pylint: disable=protected-access
+
 import asyncio
 from typing import Any
 

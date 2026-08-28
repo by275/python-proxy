@@ -1,5 +1,9 @@
 """TLS stream adapter for asyncio streams."""
 
+# SSLProtocol is a deliberately isolated compatibility adapter.  Its app
+# transport state is private in CPython and has no public equivalent.
+# pylint: disable=protected-access
+
 import asyncio
 from asyncio import create_task
 
