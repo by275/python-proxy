@@ -69,4 +69,9 @@ jobs:
         run: python -c "import importlib; importlib.import_module('${{ matrix.module }}')"
 
       - name: Run optional adapter contracts
-        run: python -m unittest tests.test_optional_adapters tests.test_optional_runtime -v
+        run: >-
+          python -m unittest
+          tests.test_optional_adapters
+          tests.test_optional_runtime
+          tests.test_phase1_integration
+          -v
