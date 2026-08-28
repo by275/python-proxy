@@ -1,3 +1,5 @@
+"""Backward-compatible facade for protocol and transport helpers."""
+
 from . import websocket
 from . import tls
 from . import config

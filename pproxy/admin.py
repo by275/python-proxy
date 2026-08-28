@@ -1,3 +1,5 @@
+"""Minimal HTTP administration handlers for runtime reload support."""
+
 import json
 
 from .runtime import ADMIN_BODY_LIMIT

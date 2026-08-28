@@ -1,3 +1,5 @@
+"""Pure-Python cipher implementations retained for compatibility."""
+
 import base64
 import hashlib
 import struct
@@ -5,8 +7,6 @@ from typing import Any, Callable, ClassVar, Iterator
 
 from .cipher import BaseCipher, AEADCipher
 from .errors import require
-
-# Pure Python Ciphers
 
 class Table_Cipher(BaseCipher):
     PYTHON = True

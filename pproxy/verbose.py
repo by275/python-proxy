@@ -1,4 +1,9 @@
-import time, sys, asyncio, functools
+"""Optional console statistics and verbose runtime reporting."""
+
+import asyncio
+import functools
+import sys
+import time
 
 b2s = lambda i: f'{i/2**30:.1f}G' if i>=2**30 else f'{i/2**20:.1f}M' if i>=2**20 else f'{i/1024:.1f}K'
 

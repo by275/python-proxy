@@ -1,3 +1,5 @@
+"""Package metadata and source-tree version discovery."""
+
 import subprocess
 from pathlib import Path
 

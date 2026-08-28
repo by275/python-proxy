@@ -1,3 +1,5 @@
+"""Cipher factories and stream/datagram cipher adapters."""
+
 import copy
 import os
 import hashlib

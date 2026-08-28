@@ -1,4 +1,14 @@
-import datetime, zlib, os, binascii, hmac, hashlib, time, random, collections
+"""Optional protocol framing plugins used by cipher connections."""
+
+import binascii
+import collections
+import datetime
+import hashlib
+import hmac
+import os
+import random
+import time
+import zlib
 from . import transport
 from .errors import require
 
