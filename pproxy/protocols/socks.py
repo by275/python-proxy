@@ -114,7 +114,7 @@ class SS(SSR):
         def write(data, original=writer.write):
             nonlocal chunk_id
             if not data:
-                return
+                return None
             checksum = hmac.new(
                 cipher.iv + chunk_id.to_bytes(4, 'big'),
                 data,
@@ -155,11 +155,11 @@ class SS(SSR):
         if users:
             user = next(filter(lambda item: data[:len(item)] == item, users), None)
             if user is None:
-                return
+                return None
             reader.read(len(user))
         n = reader.read(1)[0]
         if n not in (1, 3, 4):
-            return
+            return None
         host_name, port = socks_address(reader, n)
         return user, host_name, port, reader.read()
 
@@ -263,10 +263,10 @@ class Socks5(BaseProtocol):
     def udp_accept(self, data, **kw):
         reader = io.BytesIO(data)
         if reader.read(3) != b'\x00\x00\x00':
-            return
+            return None
         n = reader.read(1)[0]
         if n not in (1, 3, 4):
-            return
+            return None
         host_name, port = socks_address(reader, n)
         return True, host_name, port, reader.read()
 

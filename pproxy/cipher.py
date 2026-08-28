@@ -299,7 +299,7 @@ class StreamCipherAdapter:
             self.writer_cipher.setup_iv()
             self._raw_write(self.pencrypt2(self.writer_cipher.iv))
         if not data:
-            return
+            return None
         return self._raw_write(self.pencrypt2(self.writer_cipher.encrypt(self.pencrypt(data))))
 
     def attach(self):

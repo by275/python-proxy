@@ -167,7 +167,7 @@ class WebSocketStream:
 
     def write(self, data):
         if not data:
-            return
+            return None
         return self.write_frame(2, data)
 
 

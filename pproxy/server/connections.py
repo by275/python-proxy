@@ -19,7 +19,6 @@ from ..runtime import (
     UDP_TASK_LIMIT,
 )
 from .common import (
-    DUMMY,
     SOCKET_TIMEOUT,
     compile_rule,
     prepare_ciphers,
@@ -89,10 +88,10 @@ class ProxyDirect:
                 self.transport = None
                 owner.udp_touch(client_addr, self)
 
-            def connection_made(self, new_transport):
-                self.transport = new_transport
+            def connection_made(self, transport):  # pylint: disable=redefined-outer-name  # asyncio callback signature
+                self.transport = transport
                 for data in self.databuf:
-                    new_transport.sendto(data)
+                    transport.sendto(data)
                 self.databuf.clear()
                 owner.udp_touch(client_addr, self)
 
@@ -243,8 +242,10 @@ class ProxySimple(ProxyDirect):
         owner = self
 
         class Protocol(asyncio.DatagramProtocol):
-            def connection_made(self, new_transport):
-                self.transport = new_transport
+            transport = None
+
+            def connection_made(self, transport):  # pylint: disable=redefined-outer-name  # asyncio callback signature
+                self.transport = transport
 
             def datagram_received(self, data, addr):
                 if owner.udp_inflight >= UDP_TASK_LIMIT:

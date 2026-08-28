@@ -135,8 +135,7 @@ class ChaCha20_IETF_POLY1305_Cipher(AEADCipher):
         data = self.cipher_encrypt(nonce, s, counter=1)
         if tag is None:
             return data, poly1305(self.cipher_encrypt, nonce, data)
-        else:
-            return data
+        return data
     encrypt_and_digest = decrypt_and_verify = process
     def setup(self):
         self.cipher_encrypt = lambda nonce, s, counter=0: ChaCha20_IETF_Cipher(self.key, setup_key=False, counter=counter).setup_iv(nonce).encrypt(s)
@@ -265,8 +264,7 @@ class GCMCipher(AEADCipher):
         ret = bytes(s[i*16+j]^o for i in range((len(s)+15)//16) for j, o in enumerate(self.cipher.encrypt(z|(i+2)&((1<<32)-1))) if i*16+j < len(s))
         if tag is None:
             return ret, (ghash(ret)^h).to_bytes(self.TAG_LENGTH, 'big')
-        else:
-            return ret
+        return ret
     encrypt_and_digest = decrypt_and_verify = process
 
 class RAW:
@@ -304,9 +302,9 @@ class AES(RAW):
         return bytes([self.g1[s[self.shifts[j][1]]]^self.ekey[-1][j] for j in range(16)])
 
 for method in (CFBCipher, CFB8Cipher, CFB1Cipher, CTRCipher, OFBCipher, GCMCipher):
-    for key in (32, 24, 16):
-        name = f'AES_{key*8}_{method.__name__[:-6]}_Cipher'
-        globals()[name] = type(name, (method,), dict(KEY_LENGTH=key, IV_LENGTH=key if method is GCMCipher else 16, CIPHER=AES))
+    for key_size in (32, 24, 16):
+        name = f'AES_{key_size*8}_{method.__name__[:-6]}_Cipher'
+        globals()[name] = type(name, (method,), {'KEY_LENGTH': key_size, 'IV_LENGTH': key_size if method is GCMCipher else 16, 'CIPHER': AES})
 
 class Blowfish(RAW):
     P: ClassVar[list[int]] = []

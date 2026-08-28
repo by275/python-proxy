@@ -13,31 +13,31 @@ from .transparent import Echo, Pf, Redir, SSH, Tunnel
 from .websocket import CFP, WS
 
 
-MAPPINGS = dict(
-    direct=Direct,
-    http=HTTP,
-    httponly=HTTPOnly,
-    httpadmin=HTTPAdmin,
-    ssh=SSH,
-    socks5=Socks5,
-    socks4=Socks4,
-    socks=Socks5,
-    ss=SS,
-    ssr=SSR,
-    redir=Redir,
-    pf=Pf,
-    tunnel=Tunnel,
-    echo=Echo,
-    ws=WS,
-    cfp=CFP,
-    trojan=Trojan,
-    h2=H2,
-    h3=H3,
-    ssl='',
-    secure='',
-    insecure='',
-    quic='',
-)
+MAPPINGS = {
+    'direct': Direct,
+    'http': HTTP,
+    'httponly': HTTPOnly,
+    'httpadmin': HTTPAdmin,
+    'ssh': SSH,
+    'socks5': Socks5,
+    'socks4': Socks4,
+    'socks': Socks5,
+    'ss': SS,
+    'ssr': SSR,
+    'redir': Redir,
+    'pf': Pf,
+    'tunnel': Tunnel,
+    'echo': Echo,
+    'ws': WS,
+    'cfp': CFP,
+    'trojan': Trojan,
+    'h2': H2,
+    'h3': H3,
+    'ssl': '',
+    'secure': '',
+    'insecure': '',
+    'quic': '',
+}
 MAPPINGS['in'] = ''
 
 

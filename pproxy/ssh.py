@@ -51,18 +51,18 @@ class ProxySSH(runtime.ProxySimple):
                 password = None
             else:
                 client_keys = None
-            connect_kwargs = dict(
-                host=self.host_name,
-                port=self.port,
-                local_addr=local_addr,
-                family=family,
-                x509_trusted_certs=None,
-                username=username,
-                password=password,
-                client_keys=client_keys,
-                keepalive_interval=60,
-                tunnel=tunnel,
-            )
+            connect_kwargs = {
+                'host': self.host_name,
+                'port': self.port,
+                'local_addr': local_addr,
+                'family': family,
+                'x509_trusted_certs': None,
+                'username': username,
+                'password': password,
+                'client_keys': client_keys,
+                'keepalive_interval': 60,
+                'tunnel': tunnel,
+            }
             if self.insecure_host_key:
                 connect_kwargs['known_hosts'] = None
             conn = await asyncssh.connect(**connect_kwargs)

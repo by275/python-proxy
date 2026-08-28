@@ -1,7 +1,6 @@
 """HTTP parsing helpers and HTTP-family protocol implementations."""
 
 import base64
-import asyncio
 import re
 import urllib.parse
 
@@ -125,7 +124,7 @@ class HTTP(BaseProtocol):
                         if users:
                             authtable.set_authed(user)
                         if type(text) is str:
-                            text = (text % dict(host=host)).encode()
+                            text = (text % {'host': host}).encode()
                         await reply(
                             200,
                             f'{ver} 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nCache-Control: max-age=900\r\nContent-Length: {len(text)}\r\n\r\n'.encode(),
@@ -206,7 +205,7 @@ class HTTPOnly(HTTP):
 
         def write(data, o=writer_remote.write):
             if not data:
-                return
+                return None
             buffer.extend(data)
             pos = buffer.find(b'\r\n\r\n')
             if pos != -1:
@@ -226,6 +225,7 @@ class HTTPOnly(HTTP):
                 )
                 buffer.clear()
                 return o(data)
+            return None
 
         writer_remote.write = write
 

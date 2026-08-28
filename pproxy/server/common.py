@@ -24,6 +24,7 @@ class AuthTable:
     def authed(self):
         if time.time() - self._auth.get(self.remote_ip, 0) <= self.authtime:
             return self._user[self.remote_ip]
+        return None
 
     def set_authed(self, user):
         self._auth[self.remote_ip] = time.time()

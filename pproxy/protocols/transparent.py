@@ -47,9 +47,14 @@ class Redir(Transparent):
             return socket.inet_ntop(socket.AF_INET6, buf[8:24]), int.from_bytes(buf[2:4], 'big')
         except (OSError, ValueError, AssertionError):
             pass
+        return None
 
 
 class Pf(Transparent):
+    def __init__(self, param):
+        super().__init__(param)
+        self.pf = None
+
     def query_remote(self, sock):
         try:
             import fcntl
@@ -70,12 +75,13 @@ class Pf(Transparent):
                     2,
                 )
             )
-            if not hasattr(self, 'pf'):
+            if self.pf is None:
                 self.pf = open('/dev/pf', 'a+b')
             fcntl.ioctl(self.pf.fileno(), 0xc0544417, pnl)
             return socket.inet_ntop(sock.family, pnl[48:48 + len(src_ip)]), int.from_bytes(pnl[76:78], 'big')
         except (OSError, ValueError, AssertionError):
             pass
+        return None
 
 
 class Tunnel(Transparent):
