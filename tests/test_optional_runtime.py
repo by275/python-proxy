@@ -176,7 +176,7 @@ async def quic_fixture(protocol_name):
         listener = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:0')
         listener.quicserver.load_cert_chain(cert_path, key_path)
         handler = await listener.start_server({'rserver': [], 'verbose': lambda *_: None})
-        proxy_port = handler._transport.get_extra_info('sockname')[1]
+        proxy_port = handler._transport.get_extra_info('sockname')[1]  # pylint: disable=protected-access
         client = server.proxies_by_uri(f'{protocol_name}+http://127.0.0.1:{proxy_port}')
         client.quicclient.load_verify_locations(cadata=certificate_data)
         try:
@@ -230,7 +230,7 @@ class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         b'first-connection',
                     )
                     writer.close()
-                    remote_protocol = next(iter(handler._protocols.values()))
+                    remote_protocol = next(iter(handler._protocols.values()))  # pylint: disable=protected-access
                     remote_protocol.close()
                     await asyncio.wait_for(client.wait_closed(), 1)
                     handler.close()
@@ -238,7 +238,7 @@ class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     replacement = await listener.start_server(
                         {'rserver': [], 'verbose': lambda *_: None}
                     )
-                    client.port = replacement._transport.get_extra_info('sockname')[1]
+                    client.port = replacement._transport.get_extra_info('sockname')[1]  # pylint: disable=protected-access
                     try:
                         reader, writer = await asyncio.wait_for(
                             client.tcp_connect('127.0.0.1', echo_port),

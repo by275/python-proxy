@@ -1,16 +1,18 @@
-import os, time, sys, os
+import os
+import sys
+import time
 from pproxy.cipher import MAP
 from pproxy.cipherpy import MAP as MAP_PY
 
-def test_cipher(A, size=32*1024, repeat=128):
-    for i in range(repeat):
-        key = os.urandom(A.KEY_LENGTH)
-        iv = os.urandom(A.IV_LENGTH)
-        a = A(key)
+def test_cipher(cipher_class, size=32*1024, repeat=128):
+    for _ in range(repeat):
+        key = os.urandom(cipher_class.KEY_LENGTH)
+        iv = os.urandom(cipher_class.IV_LENGTH)
+        a = cipher_class(key)
         a.setup_iv(iv)
         s = os.urandom(size)
         s2 = a.encrypt(s)
-        a = A(key, True)
+        a = cipher_class(key, True)
         a.setup_iv(iv)
         s4 = a.decrypt(s2)
         assert s == s4
@@ -27,4 +29,3 @@ if A:
     print(cipher, time.perf_counter()-t)
 else:
     print('unknown cipher', cipher)
-

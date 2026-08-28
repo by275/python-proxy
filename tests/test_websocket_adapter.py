@@ -36,21 +36,21 @@ class WebSocketAdapterTests(unittest.TestCase):
 
     def test_server_side_adapter_rejects_unmasked_input(self):
         class Reader:
-            def feed_data(self, data):
+            def feed_data(self, _data):
                 return None
 
         class Writer:
             def __init__(self):
                 self.closed = False
 
-            def write(self, data):
+            def write(self, _data):
                 return None
 
             def close(self):
                 self.closed = True
 
         reader, writer = Reader(), Writer()
-        adapter = WebSocketStream(reader, writer, expect_masked=True).attach()
+        _adapter = WebSocketStream(reader, writer, expect_masked=True).attach()
 
         with self.assertRaises(ProtocolError):
             reader.feed_data(b'\x81\x02ok')
