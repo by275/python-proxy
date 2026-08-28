@@ -80,33 +80,38 @@ class ProxyDirect:
             prot.transport.close()
 
     async def udp_open_connection(self, host, port, data, addr, reply):
+        owner = self
+        client_addr = addr
+
         class Protocol(asyncio.DatagramProtocol):
-            def __init__(prot, data):
-                prot.databuf = [data]
-                prot.transport = None
-                self.udp_touch(addr, prot)
+            def __init__(self, data):
+                self.databuf = [data]
+                self.transport = None
+                owner.udp_touch(client_addr, self)
 
-            def connection_made(prot, transport):
-                prot.transport = transport
-                for data in prot.databuf:
-                    transport.sendto(data)
-                prot.databuf.clear()
-                self.udp_touch(addr, prot)
+            def connection_made(self, new_transport):
+                self.transport = new_transport
+                for data in self.databuf:
+                    new_transport.sendto(data)
+                self.databuf.clear()
+                owner.udp_touch(client_addr, self)
 
-            def new_data_arrived(prot, data):
-                if prot.transport:
-                    prot.transport.sendto(data)
+            def new_data_arrived(self, data):
+                if self.transport:
+                    self.transport.sendto(data)
                 else:
-                    prot.databuf.append(data)
-                self.udp_touch(addr, prot)
+                    self.databuf.append(data)
+                owner.udp_touch(client_addr, self)
 
-            def datagram_received(prot, data, upstream_addr):
-                data = self.udp_packet_unpack(data)
+            def datagram_received(self, data, addr):
+                del addr
+                data = owner.udp_packet_unpack(data)
                 reply(data)
-                self.udp_touch(addr, prot)
+                owner.udp_touch(client_addr, self)
 
-            def connection_lost(prot, exc):
-                self.udp_discard(addr)
+            def connection_lost(self, exc):
+                del exc
+                owner.udp_discard(client_addr)
 
         if addr in self.udpmap:
             prot = self.udpmap[addr]
@@ -235,22 +240,24 @@ class ProxySimple(ProxyDirect):
     def udp_start_server(self, args):
         from .handlers import datagram_handler
 
-        class Protocol(asyncio.DatagramProtocol):
-            def connection_made(prot, transport):
-                prot.transport = transport
+        owner = self
 
-            def datagram_received(prot, data, addr):
-                if self.udp_inflight >= UDP_TASK_LIMIT:
+        class Protocol(asyncio.DatagramProtocol):
+            def connection_made(self, new_transport):
+                self.transport = new_transport
+
+            def datagram_received(self, data, addr):
+                if owner.udp_inflight >= UDP_TASK_LIMIT:
                     return
-                self.udp_inflight += 1
+                owner.udp_inflight += 1
 
                 async def handle_datagram():
                     try:
-                        await datagram_handler(prot.transport, data, addr, **vars(self), **args)
+                        await datagram_handler(self.transport, data, addr, **vars(owner), **args)
                     finally:
-                        self.udp_inflight -= 1
+                        owner.udp_inflight -= 1
 
-                self.task_registry.create_task(handle_datagram(), name='udp-datagram')
+                owner.task_registry.create_task(handle_datagram(), name='udp-datagram')
 
         loop = asyncio.get_running_loop()
         return loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
