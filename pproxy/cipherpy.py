@@ -1,4 +1,7 @@
-import hashlib, struct, base64
+import base64
+import hashlib
+import struct
+from typing import Any, Callable, ClassVar, Iterator
 
 from .cipher import BaseCipher, AEADCipher
 from .errors import require
@@ -9,6 +12,8 @@ class Table_Cipher(BaseCipher):
     PYTHON = True
     KEY_LENGTH = 0
     IV_LENGTH = 0
+    encrypt_table: bytes
+    decrypt_table: bytes
     def setup(self):
         if self.key in self.CACHE:
             self.encrypt_table, self.decrypt_table = self.CACHE[self.key]
@@ -27,6 +32,12 @@ class Table_Cipher(BaseCipher):
 
 class StreamCipher(BaseCipher):
     PYTHON = True
+    stream: Iterator[int]
+
+    def core(self):
+        """Return the keystream iterator implemented by each stream cipher."""
+        raise NotImplementedError
+
     def setup(self):
         self.stream = self.core()
     def encrypt(self, s):
@@ -116,6 +127,7 @@ class ChaCha20_IETF_POLY1305_Cipher(AEADCipher):
     IV_LENGTH = 32
     NONCE_LENGTH = 12
     TAG_LENGTH = 16
+    cipher_encrypt: Callable[..., bytes]
     def process(self, s, tag=None):
         nonce = self.nonce
         if tag is not None:
@@ -150,6 +162,10 @@ class Salsa20_Cipher(StreamCipher):
             data[8:10] = (0, data[9]+1) if data[8]==0xffffffff else (data[8]+1, data[9])
 
 class CFBCipher(StreamCipher):
+    CIPHER: ClassVar[Any]
+    bit_mode: bool
+    last: int | None
+
     def setup(self):
         segment_bit = getattr(self, 'SEGMENT_SIZE', self.IV_LENGTH*8)
         self.bit_mode = segment_bit % 8 != 0
@@ -198,6 +214,8 @@ class CFB1Cipher(CFBCipher):
     SEGMENT_SIZE = 1
 
 class CTRCipher(StreamCipher):
+    CIPHER: ClassVar[Any]
+
     def setup(self):
         self.stream = self.core()
         self.cipher = self.CIPHER.new(self.key)
@@ -218,6 +236,8 @@ class GCMCipher(AEADCipher):
     PYTHON = True
     NONCE_LENGTH = 12
     TAG_LENGTH = 16
+    CIPHER: ClassVar[Any]
+    hkey: list[int]
     def setup(self):
         self.cipher = self.CIPHER.new(self.key)
         self.hkey = []
@@ -289,7 +309,7 @@ for method in (CFBCipher, CFB8Cipher, CFB1Cipher, CTRCipher, OFBCipher, GCMCiphe
         globals()[name] = type(name, (method,), dict(KEY_LENGTH=key, IV_LENGTH=key if method is GCMCipher else 16, CIPHER=AES))
 
 class Blowfish(RAW):
-    P = None
+    P: ClassVar[list[int]] = []
     @staticmethod
     def hex_pi():
         n, d = -3, 1

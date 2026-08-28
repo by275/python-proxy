@@ -3,14 +3,27 @@ import os
 import hashlib
 import hmac
 import warnings
+from typing import Any, Callable, ClassVar
+
 from . import transport
 from .errors import ProtocolError, require
 
 LEGACY_CIPHERS = frozenset({'rc4', 'rc4-md5', 'bf-cfb', 'cast5-cfb', 'des-cfb'})
 
-class BaseCipher(object):
-    PYTHON = False
-    CACHE = {}
+class BaseCipher:
+    PYTHON: ClassVar[bool] = False
+    CACHE: ClassVar[dict[bytes, bytes]] = {}
+    KEY_LENGTH: ClassVar[int] = 0
+    IV_LENGTH: ClassVar[int] = 0
+    cipher: Any
+    key: bytes
+    ota: bool
+    iv: bytes | None
+
+    def setup(self):
+        """Initialize the backend cipher after the IV has been selected."""
+        raise NotImplementedError
+
     def __init__(self, key, ota=False, setup_key=True):
         if self.KEY_LENGTH > 0 and setup_key:
             self.key = self.CACHE.get(b'key'+key)
@@ -37,6 +50,21 @@ class BaseCipher(object):
 
 class AEADCipher(BaseCipher):
     PACKET_LIMIT = 16*1024-1
+    NONCE_LENGTH: ClassVar[int] = 0
+    TAG_LENGTH: ClassVar[int] = 0
+    cipher_new: Callable[..., Any]
+    _nonce: int
+    _buffer: bytearray
+    _declen: int | None
+
+    def decrypt_and_verify(self, buffer, tag):
+        """Decrypt one authenticated packet using the backend primitive."""
+        raise NotImplementedError
+
+    def encrypt_and_digest(self, buffer):
+        """Encrypt one packet and return its authentication tag."""
+        raise NotImplementedError
+
     def setup_iv(self, iv=None):
         self.iv = os.urandom(self.IV_LENGTH) if iv is None else iv
         randkey = hmac.new(self.iv, self.key, hashlib.sha1).digest()
