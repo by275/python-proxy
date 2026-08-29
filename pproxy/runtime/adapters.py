@@ -56,6 +56,9 @@ class OptionalAdapter(Protocol):
 
 def require_optional_adapter(adapter: object) -> OptionalAdapter:
     """Validate and return an object implementing the optional contract."""
-    if not isinstance(adapter, OptionalAdapter):
+    if (
+        not isinstance(adapter, OptionalAdapter)
+        or not isinstance(getattr(adapter, 'adapter_capabilities', None), AdapterCapabilities)
+    ):
         raise TypeError(f'{type(adapter).__name__} does not implement OptionalAdapter')
     return adapter

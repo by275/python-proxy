@@ -34,6 +34,24 @@ class OptionalAdapterTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             require_optional_adapter(object())
 
+        class InvalidCapabilities:
+            adapter_capabilities = object()
+
+            def close(self):
+                return None
+
+            async def wait_closed(self):
+                return None
+
+            async def aclose(self):
+                return None
+
+            async def wait_open_connection(self, _host, _port, _local_addr, _family):
+                return None, None
+
+        with self.assertRaises(TypeError):
+            require_optional_adapter(InvalidCapabilities())
+
     def test_h2_adapter_keeps_server_compatibility_alias(self):
         self.assertIs(server.ProxyH2, ProxyH2)
 
