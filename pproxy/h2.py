@@ -5,14 +5,23 @@ import functools
 
 from . import proto
 from .errors import ProtocolError
-from . import server as runtime
-from .runtime import H2_STREAM_LIMIT
+from .runtime import AdapterCapabilities, H2_STREAM_LIMIT
+from .server.connections import ProxySimple
+from .server.handlers import stream_handler
 from .transport.private import h2_begin_stream
 
 
-class ProxyH2(runtime.ProxySimple):
+class ProxyH2(ProxySimple):
     """Proxy backend for HTTP/2 streams using the optional ``h2`` package."""
 
+    adapter_capabilities = AdapterCapabilities(
+        name='h2',
+        dependency='h2',
+        supports_streams=True,
+        supports_datagrams=False,
+        multiplexed=True,
+        owns_shared_session=True,
+    )
     MAX_STREAMS = H2_STREAM_LIMIT
     MAX_STREAM_BUFFER = 1024 * 1024
 
@@ -233,7 +242,7 @@ class ProxyH2(runtime.ProxySimple):
         streams[stream_id] = (stream_reader, stream_writer)
         return stream_reader, stream_writer
 
-    async def start_server(self, args, stream_handler=runtime.stream_handler):
+    async def start_server(self, args, stream_handler=stream_handler):
         """Start an HTTP/2 listener using the shared proxy handler."""
         handler = functools.partial(stream_handler, **vars(self), **args)
         return await super().start_server(

@@ -8,8 +8,9 @@ import asyncio
 import functools
 from typing import Any
 
-from . import server as runtime
-from .runtime import UDP_LIMIT
+from .runtime import AdapterCapabilities, UDP_LIMIT
+from .server.connections import ProxySimple
+from .server.handlers import datagram_handler, stream_handler
 from .transport.private import (
     quic_connection,
     quic_create_stream,
@@ -23,9 +24,17 @@ from .transport.private import (
 )
 
 
-class ProxyQUIC(runtime.ProxySimple):  # pylint: disable=too-many-instance-attributes
+class ProxyQUIC(ProxySimple):  # pylint: disable=too-many-instance-attributes
     """Proxy backend for QUIC streams using the optional ``aioquic`` package."""
 
+    adapter_capabilities = AdapterCapabilities(
+        name='quic',
+        dependency='aioquic',
+        supports_streams=True,
+        supports_datagrams=True,
+        multiplexed=True,
+        owns_shared_session=True,
+    )
     MAX_UDP_FLOWS = UDP_LIMIT
 
     def __init__(self, quicserver, quicclient, **kw):
@@ -241,7 +250,7 @@ class ProxyQUIC(runtime.ProxySimple):  # pylint: disable=too-many-instance-attri
                     )
                     event.get_extra_info = {}.get
                     owner.task_registry.create_task(
-                        runtime.datagram_handler(event, event.data, addr, **vars(owner), **args)
+                        datagram_handler(event, event.data, addr, **vars(owner), **args)
                     )
                     return
                 super().quic_event_received(event)
@@ -253,7 +262,7 @@ class ProxyQUIC(runtime.ProxySimple):  # pylint: disable=too-many-instance-attri
             create_protocol=Protocol,
         ), None
 
-    async def start_server(self, args, stream_handler=runtime.stream_handler):
+    async def start_server(self, args, stream_handler=stream_handler):
         """Start a QUIC listener for the configured stream handler."""
         import aioquic.asyncio
 
@@ -271,6 +280,15 @@ class ProxyQUIC(runtime.ProxySimple):  # pylint: disable=too-many-instance-attri
 
 class ProxyH3(ProxyQUIC):
     """Proxy backend for HTTP/3 streams using the optional ``aioquic`` package."""
+
+    adapter_capabilities = AdapterCapabilities(
+        name='h3',
+        dependency='aioquic',
+        supports_streams=True,
+        supports_datagrams=True,
+        multiplexed=True,
+        owns_shared_session=True,
+    )
 
     def get_stream(self, conn, stream_id):
         """Create an asyncio-like HTTP/3 reader and writer pair."""
@@ -419,7 +437,7 @@ class ProxyH3(ProxyQUIC):
         """Open one HTTP/3 bidirectional stream."""
         return (await self.wait_h3_connection()).open_stream()
 
-    async def start_server(self, args, stream_handler=runtime.stream_handler):
+    async def start_server(self, args, stream_handler=stream_handler):
         """Start an HTTP/3 listener for the configured stream handler."""
         import aioquic.asyncio
 

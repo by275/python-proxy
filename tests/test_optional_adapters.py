@@ -5,10 +5,35 @@ import unittest
 from pproxy import server
 from pproxy.h2 import ProxyH2
 from pproxy.quic import ProxyH3, ProxyQUIC
+from pproxy.runtime import OptionalAdapter, require_optional_adapter
 from pproxy.ssh import ProxySSH
 
 
 class OptionalAdapterTests(unittest.TestCase):
+    def test_optional_adapters_implement_the_lifecycle_contract(self):
+        expected = {
+            ProxyH2: ('h2', 'h2', False),
+            ProxyQUIC: ('quic', 'aioquic', True),
+            ProxyH3: ('h3', 'aioquic', True),
+            ProxySSH: ('ssh', 'asyncssh', False),
+        }
+
+        for adapter_class, (name, dependency, datagrams) in expected.items():
+            with self.subTest(adapter=adapter_class.__name__):
+                adapter = adapter_class.__new__(adapter_class)
+                self.assertIsInstance(adapter, OptionalAdapter)
+                self.assertIs(require_optional_adapter(adapter), adapter)
+                self.assertEqual(adapter.adapter_capabilities.name, name)
+                self.assertEqual(adapter.adapter_capabilities.dependency, dependency)
+                self.assertEqual(adapter.adapter_capabilities.supports_datagrams, datagrams)
+                self.assertTrue(adapter.adapter_capabilities.supports_streams)
+                self.assertTrue(adapter.adapter_capabilities.multiplexed)
+                self.assertTrue(adapter.adapter_capabilities.owns_shared_session)
+
+    def test_contract_validation_rejects_incomplete_objects(self):
+        with self.assertRaises(TypeError):
+            require_optional_adapter(object())
+
     def test_h2_adapter_keeps_server_compatibility_alias(self):
         self.assertIs(server.ProxyH2, ProxyH2)
 

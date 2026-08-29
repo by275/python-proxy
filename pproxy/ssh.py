@@ -2,12 +2,23 @@
 
 import asyncio
 
-from . import server as runtime
 from .errors import ConfigurationError
+from .runtime import AdapterCapabilities
+from .server.connections import ProxyDirect, ProxySimple
+from .server.handlers import stream_handler
 
 
-class ProxySSH(runtime.ProxySimple):
+class ProxySSH(ProxySimple):
     """Proxy backend for SSH tunnels using the optional ``asyncssh`` package."""
+
+    adapter_capabilities = AdapterCapabilities(
+        name='ssh',
+        dependency='asyncssh',
+        supports_streams=True,
+        supports_datagrams=False,
+        multiplexed=True,
+        owns_shared_session=True,
+    )
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -129,10 +140,10 @@ class ProxySSH(runtime.ProxySimple):
             self.sshconn = None
             raise
 
-    async def start_server(self, args, stream_handler=runtime.stream_handler, tunnel=None):
+    async def start_server(self, args, stream_handler=stream_handler, tunnel=None):
         """Start an SSH-backed listener for the configured jump destination."""
         # SSH server mode requires a configured jump, not the direct sentinel.
-        if type(self.jump) is runtime.ProxyDirect:  # pylint: disable=unidiomatic-typecheck
+        if type(self.jump) is ProxyDirect:  # pylint: disable=unidiomatic-typecheck
             raise ConfigurationError('ssh server mode unsupported')
         await self.wait_ssh_connection(tunnel=tunnel)
         conn = self.sshconn.result()
