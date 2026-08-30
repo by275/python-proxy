@@ -1,6 +1,7 @@
 """Compare accelerated and pure-Python cipher implementations."""
 
-import os, time
+import os
+import time
 from pproxy.cipher import AES_256_CFB_Cipher as A
 from pproxy.cipherpy import AES_256_CFB_Cipher as B  # pylint: disable=no-name-in-module  # generated registry class
 from pproxy.cipher import ChaCha20_Cipher as C

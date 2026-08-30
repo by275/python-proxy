@@ -7,7 +7,7 @@ from . import proto
 from .errors import ProtocolError
 from .runtime import AdapterCapabilities, H2_STREAM_LIMIT
 from .server.connections import ProxySimple
-from .server.handlers import stream_handler
+from .server.handlers import stream_handler as default_stream_handler
 from .transport.private import h2_begin_stream
 
 
@@ -114,7 +114,7 @@ class ProxyH2(ProxySimple):
             read = reader.read
             while not reader.at_eof() and not writer.is_closing():
                 try:
-                    data = await read(65636)
+                    data = await read(65536)
                     if not data:
                         break
                     events = conn.receive_data(data)
@@ -246,7 +246,7 @@ class ProxyH2(ProxySimple):
         streams[stream_id] = (stream_reader, stream_writer)
         return stream_reader, stream_writer
 
-    async def start_server(self, args, stream_handler=stream_handler):
+    async def start_server(self, args, stream_handler=default_stream_handler):
         """Start an HTTP/2 listener using the shared proxy handler."""
         handler = functools.partial(stream_handler, **vars(self), **args)
         return await super().start_server(

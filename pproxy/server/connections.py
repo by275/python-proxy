@@ -343,7 +343,9 @@ class ProxySimple(ProxyDirect):
     async def start_server(self, args, stream_handler=None):
         """Start a TCP or Unix listener with tracked client writers."""
         if stream_handler is None:
-            from .handlers import stream_handler
+            from .handlers import stream_handler as default_stream_handler
+
+            stream_handler = default_stream_handler
 
         handler = functools.partial(stream_handler, **vars(self), **args)
 
@@ -437,7 +439,9 @@ class ProxyBackward(ProxySimple):
     async def start_server(self, args, stream_handler=None):
         """Start the configured number of reverse outbound connections."""
         if stream_handler is None:
-            from .handlers import stream_handler
+            from .handlers import stream_handler as default_stream_handler
+
+            stream_handler = default_stream_handler
 
         handler = functools.partial(stream_handler, **vars(self.server), **args)
         for _ in range(self.backward_num):

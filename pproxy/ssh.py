@@ -5,7 +5,7 @@ import asyncio
 from .errors import ConfigurationError
 from .runtime import AdapterCapabilities
 from .server.connections import ProxyDirect, ProxySimple
-from .server.handlers import stream_handler
+from .server.handlers import stream_handler as default_stream_handler
 
 
 class ProxySSH(ProxySimple):
@@ -140,7 +140,7 @@ class ProxySSH(ProxySimple):
             self.sshconn = None
             raise
 
-    async def start_server(self, args, stream_handler=stream_handler, tunnel=None):
+    async def start_server(self, args, stream_handler=default_stream_handler, tunnel=None):
         """Start an SSH-backed listener for the configured jump destination."""
         # SSH server mode requires a configured jump, not the direct sentinel.
         if type(self.jump) is ProxyDirect:  # pylint: disable=unidiomatic-typecheck

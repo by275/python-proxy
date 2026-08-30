@@ -84,7 +84,11 @@ def test_cipher(cipher_class, known_vectors, size=4*1024, repeat=16):
 
 
 cipher = sys.argv[1] if len(sys.argv) > 1 else None
-data = pickle.load(open('.cipherdata', 'rb')) if os.path.exists('.cipherdata') else {}
+if os.path.exists('.cipherdata'):
+    with open('.cipherdata', 'rb') as data_file:
+        data = pickle.load(data_file)
+else:
+    data = {}
 
 if cipher is None:
     print('Testing all ciphers')
@@ -104,4 +108,5 @@ else:
         test_cipher(B, data)
 
 
-pickle.dump(data, open('.cipherdata', 'wb'))
+with open('.cipherdata', 'wb') as data_file:
+    pickle.dump(data, data_file)

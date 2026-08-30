@@ -10,7 +10,7 @@ from typing import Any
 
 from .runtime import AdapterCapabilities, UDP_LIMIT
 from .server.connections import ProxySimple
-from .server.handlers import datagram_handler, stream_handler
+from .server.handlers import datagram_handler, stream_handler as default_stream_handler
 from .transport.private import (
     quic_connection,
     quic_create_stream,
@@ -262,7 +262,7 @@ class ProxyQUIC(ProxySimple):  # pylint: disable=too-many-instance-attributes
             create_protocol=Protocol,
         ), None
 
-    async def start_server(self, args, stream_handler=stream_handler):
+    async def start_server(self, args, stream_handler=default_stream_handler):
         """Start a QUIC listener for the configured stream handler."""
         import aioquic.asyncio
 
@@ -437,7 +437,7 @@ class ProxyH3(ProxyQUIC):
         """Open one HTTP/3 bidirectional stream."""
         return (await self.wait_h3_connection()).open_stream()
 
-    async def start_server(self, args, stream_handler=stream_handler):
+    async def start_server(self, args, stream_handler=default_stream_handler):
         """Start an HTTP/3 listener for the configured stream handler."""
         import aioquic.asyncio
 
