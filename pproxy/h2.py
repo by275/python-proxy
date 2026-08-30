@@ -74,9 +74,13 @@ class ProxyH2(ProxySimple):
                 stream_writer.close()
         elif isinstance(event, events_module.ConnectionTerminated):
             return False
-        elif isinstance(event, events_module.WindowUpdated) and event.stream_id in streams:
-            _stream_reader, stream_writer = streams[event.stream_id]
-            stream_writer.window_update()
+        elif isinstance(event, events_module.WindowUpdated):
+            if event.stream_id == 0:
+                for _stream_reader, stream_writer in tuple(streams.values()):
+                    stream_writer.window_update()
+            elif event.stream_id in streams:
+                _stream_reader, stream_writer = streams[event.stream_id]
+                stream_writer.window_update()
         return True
 
     async def handler(  # pylint: disable=import-outside-toplevel,unused-argument

@@ -116,6 +116,23 @@ class H2LoopbackTests(unittest.IsolatedAsyncioTestCase):
                 )
                 writer.close()
                 await asyncio.sleep(0.02)
+
+            async def concurrent_round_trip(index):
+                reader, writer = await asyncio.wait_for(
+                    client.tcp_connect("127.0.0.1", echo_port),
+                    5,
+                )
+                payload = f"h2-concurrent-{index}-".encode().ljust(4096, b"x")
+                writer.write(payload)
+                await writer.drain()
+                response = await asyncio.wait_for(reader.readexactly(len(payload)), 5)
+                writer.close()
+                self.assertEqual(response, payload)
+
+            await asyncio.wait_for(
+                asyncio.gather(*(concurrent_round_trip(index) for index in range(20))),
+                10,
+            )
         finally:
             client.close()
             listener.close()
