@@ -12,7 +12,7 @@ script_path = pathlib.Path(__file__).resolve()
 sys.path.insert(0, str(script_path.parent))
 sys.path.insert(0, str(script_path.parents[1]))
 
-from benchmark_proxy import (  # noqa: E402
+from benchmark_proxy import (  # noqa: E402  # pylint: disable=wrong-import-position
     open_proxy_connection,
     start_echo_server,
     start_pproxy_server,
@@ -20,6 +20,7 @@ from benchmark_proxy import (  # noqa: E402
 
 
 async def benchmark_setup(proto, proxy_port, echo_port, connections):
+    """Measure setup latency for repeated connections to one proxy."""
     durations = []
     for _ in range(connections):
         started = time.perf_counter()
@@ -40,6 +41,7 @@ async def benchmark_setup(proto, proxy_port, echo_port, connections):
 
 
 async def main():
+    """Run setup benchmarks for the requested protocols."""
     parser = argparse.ArgumentParser(description="Benchmark proxy connection setup latency.")
     parser.add_argument("--protocols", nargs="+", default=["http", "socks5"])
     parser.add_argument("--connections", type=int, default=100)

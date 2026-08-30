@@ -47,7 +47,11 @@ class PurePythonCipherTests(unittest.TestCase):
         error, apply_cipher = get_cipher("chacha20-py:test-key")
         self.assertIsNone(error)
         reader, writer = Reader(), Writer()
-        apply_cipher(reader, writer, lambda data: data, lambda data: data, lambda data: data, lambda data: data)
+        apply_cipher(
+            reader, writer,
+            lambda data: data, lambda data: data,
+            lambda data: data, lambda data: data,
+        )
 
         writer.write(b"stream payload")
         reader.feed_data(b"".join(writer.writes))

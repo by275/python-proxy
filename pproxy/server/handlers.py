@@ -33,7 +33,14 @@ async def _open_upstream(  # pylint: disable=too-many-arguments,too-many-positio
             reader_remote, writer_remote, host_name, port
         )
         use_http = (await client_connected(writer_remote)) if client_connected else None
-    except (ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError, ProtocolError) as exc:
+    except (
+        ConnectionError,
+        OSError,
+        EOFError,
+        asyncio.TimeoutError,
+        ValueError,
+        ProtocolError,
+    ) as exc:
         writer_remote.close()
         raise UpstreamError('Unknown remote protocol') from exc
     return reader_remote, writer_remote, use_http
@@ -84,12 +91,16 @@ async def stream_handler(  # pylint: disable=too-many-arguments,too-many-positio
     """Accept one client stream and relay it through the selected upstream."""
     remote_ip = 'unknown_remote_ip'
     try:
-        reader, writer = proto.sslwrap(reader, writer, sslserver, True, None, verbose, task_registry)
+        reader, writer = proto.sslwrap(
+            reader, writer, sslserver, True, None, verbose, task_registry
+        )
         if unix:
             remote_ip, server_ip, remote_text = 'local', None, 'unix_local'
         else:
             peername = writer.get_extra_info('peername')
-            remote_ip, remote_port, *_ = peername if peername else ('unknow_remote_ip', 'unknow_remote_port')
+            remote_ip, remote_port, *_ = (
+                peername if peername else ('unknow_remote_ip', 'unknow_remote_port')
+            )
             server_ip = writer.get_extra_info('sockname')[0]
             remote_text = f'{remote_ip}:{remote_port}'
         local_addr = None if server_ip in ('127.0.0.1', '::1', None) else (server_ip, 0)
@@ -128,13 +139,21 @@ async def stream_handler(  # pylint: disable=too-many-arguments,too-many-positio
                 use_http,
                 modstat,
             )
-    except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
+    except (
+        ConnectionClosed,
+        ProtocolError,
+        ConnectionError,
+        OSError,
+        EOFError,
+        asyncio.TimeoutError,
+        ValueError,
+    ) as ex:
         if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
         if debug:
             raise
     # Keep the service boundary alive for backend-specific unexpected errors.
-    except Exception as ex:  # pylint: disable=broad-exception-caught  # isolate one client from service lifetime
+    except Exception as ex:  # pylint: disable=broad-exception-caught
         verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')
         if debug:
             raise
@@ -182,9 +201,17 @@ async def datagram_handler(  # pylint: disable=too-many-arguments,too-many-posit
                 writer.sendto(cipher.datagram.encrypt(rdata) if cipher else rdata, addr)
 
             await roption.udp_open_connection(host_name, port, data, addr, reply)
-    except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError) as ex:
+    except (
+        ConnectionClosed,
+        ProtocolError,
+        ConnectionError,
+        OSError,
+        EOFError,
+        asyncio.TimeoutError,
+        ValueError,
+    ) as ex:
         if not isinstance(ex, ConnectionClosed):
             verbose(f'{str(ex) or "Unsupported protocol"} from {remote_ip}')
     # Keep the datagram service alive for backend-specific unexpected errors.
-    except Exception as ex:  # pylint: disable=broad-exception-caught  # isolate one datagram from service lifetime
+    except Exception as ex:  # pylint: disable=broad-exception-caught
         verbose(f'Unhandled proxy error {type(ex).__name__}: {ex} from {remote_ip}')

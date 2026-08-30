@@ -12,7 +12,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from pproxy import proto
+from pproxy import proto  # pylint: disable=wrong-import-position
 
 
 class DummyAuthTable:

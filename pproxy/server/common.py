@@ -49,7 +49,10 @@ async def prepare_ciphers(cipher, reader, writer, bind=None, server_side=True):
             else:
                 await plugin.init_client_data(reader, writer, cipher)
             plugin.add_cipher(cipher)
-        return cipher(reader, writer, cipher.pdecrypt, cipher.pdecrypt2, cipher.pencrypt, cipher.pencrypt2)
+        return cipher(
+            reader, writer, cipher.pdecrypt, cipher.pdecrypt2,
+            cipher.pencrypt, cipher.pencrypt2,
+        )
     return None, None
 
 
@@ -69,7 +72,11 @@ def schedule(rserver, salgorithm, host_name, port):
         options = [option for option in rserver if filter_cond(option)]
         return random.choice(options) if options else None
     if salgorithm == 'lc':
-        return min(filter(filter_cond, rserver), default=None, key=lambda option: option.connections)
+        return min(
+            filter(filter_cond, rserver),
+            default=None,
+            key=lambda option: option.connections,
+        )
     raise ConfigurationError('Unknown scheduling algorithm')
 
 
@@ -80,7 +87,11 @@ def compile_rule(filename: str) -> Callable[[str], Any]:
     with open(filename, encoding='utf-8') as rule_file:
         return re.compile(
             '(:?' + ''.join(
-                '|'.join(item.strip() for item in rule_file if item.strip() and not item.startswith('#'))
+                '|'.join(
+                    item.strip()
+                    for item in rule_file
+                    if item.strip() and not item.startswith('#')
+                )
             ) + ')$'
         ).match
 

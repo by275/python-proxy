@@ -95,7 +95,10 @@ class Pf(Transparent):
                     '/dev/pf', 'a+b'
                 )
             fcntl.ioctl(self.pf.fileno(), 0xc0544417, pnl)
-            return socket.inet_ntop(sock.family, pnl[48:48 + len(src_ip)]), int.from_bytes(pnl[76:78], 'big')
+            return (
+                socket.inet_ntop(sock.family, pnl[48:48 + len(src_ip)]),
+                int.from_bytes(pnl[76:78], 'big'),
+            )
         except (OSError, ValueError, AssertionError):
             pass
         return None

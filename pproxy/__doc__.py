@@ -7,7 +7,10 @@ from pathlib import Path
 __title__       = "pproxy"
 __license__     = "MIT"
 __description__ = "Proxy server that can tunnel among remote servers by regex rules."
-__keywords__    = "proxy socks http shadowsocks shadowsocksr ssr redirect pf tunnel websocket cfp cipher ssl udp"
+__keywords__    = (
+    "proxy socks http shadowsocks shadowsocksr ssr redirect pf tunnel websocket "
+    "cfp cipher ssl udp"
+)
 __author__      = "Qian Wenjie"
 __email__       = "qianwenjie@gmail.com"
 __url__         = "https://github.com/by275/python-proxy"

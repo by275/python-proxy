@@ -66,7 +66,11 @@ def all_stat(stats):
                 for i in range(6):
                     h[i] += v2[i]
         stat = [b2s(i) for i in stat[:4]] + stat[4:]
-        print(remote_ip, f'\tDIRECT: {stat[5]} ({stat[1]},{stat[3]})  PROXY: {stat[4]} ({stat[0]},{stat[2]})')
+        print(
+            remote_ip,
+            f'\tDIRECT: {stat[5]} ({stat[1]},{stat[3]})  '
+            f'PROXY: {stat[4]} ({stat[0]},{stat[2]})',
+        )
     print(' '*3+'-'*64)
     hstat = sorted(hstat.items(), key=lambda x: sum(x[1]), reverse=True)[:15]
     hlen = max(map(lambda x: len(x[0]), hstat)) if hstat else 0
@@ -83,7 +87,10 @@ async def realtime_stat(stats):
         history.append((stats[:4], time.perf_counter()))
         i0, t0, i1, t1 = history[0][0], history[0][1], history[-1][0], history[-1][1]
         stat = [b2s((i1[i]-i0[i])/(t1-t0))+'/s' for i in range(4)] + stats[4:]
-        sys.stdout.write(f'DIRECT: {stat[5]} ({stat[1]},{stat[3]})   PROXY: {stat[4]} ({stat[0]},{stat[2]})\x1b[0K\r')
+        sys.stdout.write(
+            f'DIRECT: {stat[5]} ({stat[1]},{stat[3]})   '
+            f'PROXY: {stat[4]} ({stat[0]},{stat[2]})\x1b[0K\r'
+        )
         sys.stdout.flush()
         if len(history) >= 10:
             del history[:1]
@@ -105,7 +112,10 @@ def setup(loop, args):
             '.'.join(host_name.split('.')[-3 if host_name.endswith('.com.cn') else -2:])
             if host_name.split('.')[-1].isalpha() else host_name
         )
-        return ConnectionStat(stats[0], stats.setdefault(u+remote_ip, {}).setdefault(host_name_2, [0]*6))
+        return ConnectionStat(
+            stats[0],
+            stats.setdefault(u + remote_ip, {}).setdefault(host_name_2, [0] * 6),
+        )
     args.modstat = modstat
     def win_readline(handler):
         while True:

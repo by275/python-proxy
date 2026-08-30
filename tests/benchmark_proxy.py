@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import contextlib
+import functools
 import math
 import os
 import pathlib
@@ -12,7 +13,8 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-import pproxy
+# This script is also executable directly from a source checkout.
+import pproxy  # pylint: disable=wrong-import-position
 
 
 def proxy_uri(proto, port):
@@ -23,6 +25,7 @@ def proxy_uri(proto, port):
 
 
 async def echo_handler(reader, writer):
+    """Echo benchmark payloads and close the client stream cleanly."""
     try:
         while not reader.at_eof():
             data = await reader.read(65536)
@@ -37,12 +40,14 @@ async def echo_handler(reader, writer):
 
 
 async def start_echo_server():
+    """Start the local echo endpoint and return its server and port."""
     server = await asyncio.start_server(echo_handler, host="127.0.0.1", port=0)
     port = server.sockets[0].getsockname()[1]
     return server, port
 
 
 async def start_pproxy_server(uri):
+    """Start one proxy listener for a benchmark URI."""
     server = pproxy.Server(uri)
     handler = await server.start_server({"rserver": [], "verbose": lambda *_: None})
     port = handler.sockets[0].getsockname()[1]
@@ -50,15 +55,18 @@ async def start_pproxy_server(uri):
 
 
 async def open_direct_connection(host, port):
+    """Open a direct TCP connection for the control benchmark."""
     return await asyncio.open_connection(host=host, port=port)
 
 
 async def open_proxy_connection(proto, proxy_port, host, port):
+    """Open one proxied TCP connection for the selected protocol."""
     conn = pproxy.Connection(proxy_uri(proto, proxy_port))
     return await conn.tcp_connect(host, port)
 
 
 async def run_roundtrip(factory, payload, requests_per_worker, warmup):
+    """Run warmup and measured echo roundtrips on one connection."""
     reader, writer = await factory()
     durations = []
     try:
@@ -82,7 +90,10 @@ async def run_roundtrip(factory, payload, requests_per_worker, warmup):
     return durations
 
 
-async def benchmark_case(name, factory, payload, requests, concurrency, warmup):
+async def benchmark_case(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    name, factory, payload, requests, concurrency, warmup
+):
+    """Measure one protocol case and return throughput and latency metrics."""
     requests_per_worker = math.ceil(requests / concurrency)
     started = time.perf_counter()
     tasks = [
@@ -112,6 +123,7 @@ async def benchmark_case(name, factory, payload, requests, concurrency, warmup):
 
 
 def print_results(results):
+    """Print benchmark results in a compact tabular form."""
     print(
         "case".ljust(10),
         "req".rjust(8),
@@ -136,6 +148,7 @@ def print_results(results):
 
 
 async def main():
+    """Parse benchmark options, run cases, and close all local endpoints."""
     parser = argparse.ArgumentParser(
         description="Benchmark local direct and proxy TCP relay performance."
     )
@@ -184,11 +197,17 @@ async def main():
         results = []
         for proto in args.protocols:
             if proto == "direct":
-                factory = lambda: open_direct_connection("127.0.0.1", echo_port)
+                factory = functools.partial(
+                    open_direct_connection, "127.0.0.1", echo_port
+                )
             else:
                 proxy_port = proxy_servers[proto][1]
-                factory = lambda proto=proto, proxy_port=proxy_port: open_proxy_connection(
-                    proto, proxy_port, "127.0.0.1", echo_port
+                factory = functools.partial(
+                    open_proxy_connection,
+                    proto,
+                    proxy_port,
+                    "127.0.0.1",
+                    echo_port,
                 )
             results.append(
                 await benchmark_case(

@@ -13,7 +13,8 @@ from . import transport
 from .errors import require
 
 # Plugin class names mirror the existing wire-format registry keys.
-# pylint: disable=invalid-name
+# Serialized handshake records intentionally keep related bytes together.
+# pylint: disable=invalid-name,line-too-long
 
 def packstr(value, size=2):
     """Prefix bytes with a big-endian length field."""

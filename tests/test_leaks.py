@@ -116,7 +116,8 @@ class UdpLeakSmokeTests(unittest.TestCase):
                     return None
 
             async def create_datagram_endpoint(factory, remote_addr):
-                del remote_addr  # The production call supplies this keyword; the fake does not need it.
+                # The production call supplies this keyword; the fake does not need it.
+                del remote_addr
                 protocol = factory()
                 protocol.connection_made(DatagramTransport())
                 protocol.datagram_received(b"upstream reply", ("198.51.100.10", 53))

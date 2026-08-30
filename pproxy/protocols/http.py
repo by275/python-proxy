@@ -80,12 +80,17 @@ class HTTP(BaseProtocol):
         """Detect whether the initial bytes look like an HTTP request."""
         header = await transport.read(reader, 4)
         transport.rollback(reader, header)
-        return header in (b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE', b'CONN', b'OPTI', b'TRAC', b'PATC')
+        return header in (
+            b'GET ', b'HEAD', b'POST', b'PUT ', b'DELE',
+            b'CONN', b'OPTI', b'TRAC', b'PATC',
+        )
 
     async def accept(self, reader, user, writer, **kw):
         """Read and dispatch one HTTP request from a local client."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=MAX_HTTP_HEADER_SIZE)
-        method, path, ver, filtered_headers, host, proxy_authorization, _ = parse_http_request_head(lines[:-4])
+        (
+            method, path, ver, filtered_headers, host, proxy_authorization, _
+        ) = parse_http_request_head(lines[:-4])
 
         async def reply(  # pylint: disable=unused-argument
             code, message, body=None, wait=False
@@ -130,7 +135,10 @@ class HTTP(BaseProtocol):
         if method == 'GET' and not url.hostname:
             for payload_path, text in (httpget.items() if httpget else ()):
                 if payload_path == url.path:
-                    user = next(filter(lambda x: x.decode() == url.query, users), None) if users else True
+                    user = (
+                        next(filter(lambda x: x.decode() == url.query, users), None)
+                        if users else True
+                    )
                     if user:
                         if users:
                             authtable.set_authed(user)
@@ -138,7 +146,11 @@ class HTTP(BaseProtocol):
                             text = (text % {'host': host}).encode()
                         await reply(
                             200,
-                            f'{ver} 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\nCache-Control: max-age=900\r\nContent-Length: {len(text)}\r\n\r\n'.encode(),
+                            (
+                                f'{ver} 200 OK\r\nConnection: close\r\n'
+                                'Content-Type: text/plain\r\n'
+                                f'Cache-Control: max-age=900\r\nContent-Length: {len(text)}\r\n\r\n'
+                            ).encode(),
                             text,
                             True,
                         )
@@ -147,18 +159,32 @@ class HTTP(BaseProtocol):
         if users:
             user = authtable.authed()
             if not user:
-                user = next(filter(lambda i: ('Basic ' + base64.b64encode(i).decode()) == pauth, users), None)
+                user = next(
+                    filter(
+                        lambda i: ('Basic ' + base64.b64encode(i).decode()) == pauth,
+                        users,
+                    ),
+                    None,
+                )
                 if user is None:
                     await reply(
                         407,
-                        f'{ver} 407 Proxy Authentication Required\r\nConnection: close\r\nProxy-Authenticate: Basic realm="simple"\r\n\r\n'.encode(),
+                        (
+                            f'{ver} 407 Proxy Authentication Required\r\n'
+                            'Connection: close\r\n'
+                            'Proxy-Authenticate: Basic realm="simple"\r\n\r\n'
+                        ).encode(),
                         wait=True,
                     )
                     raise AuthenticationError('Unauthorized HTTP')
             authtable.set_authed(user)
         if method == 'CONNECT':
             host_name, port = netloc_split(authority or path)
-            return user, host_name, port, lambda writer: reply(200, f'{ver} 200 Connection established\r\nConnection: close\r\n\r\n'.encode())
+            return user, host_name, port, lambda writer: reply(
+                200,
+                f'{ver} 200 Connection established\r\n'
+                'Connection: close\r\n\r\n'.encode(),
+            )
         host_name, port = netloc_split(url.netloc or host, default_port=80)
         newpath = url._replace(netloc='', scheme='').geturl()
         request_head = f'{method} {newpath} {ver}\r\n'.encode() + filtered_headers + b'\r\n\r\n'
@@ -197,7 +223,10 @@ class HTTP(BaseProtocol):
                     lines, data = data.split(b'\r\n\r\n', 1)
                     method, path, ver, filtered_headers, _, _, _ = parse_http_request_head(lines)
                     newpath = urllib.parse.urlparse(path)._replace(netloc='', scheme='').geturl()
-                    data = f'{method} {newpath} {ver}\r\n'.encode() + filtered_headers + b'\r\n\r\n' + data
+                    data = (
+                        f'{method} {newpath} {ver}\r\n'.encode()
+                        + filtered_headers + b'\r\n\r\n' + data
+                    )
                 stat_bytes(len(data))
                 writer.write(data)
                 pending_drain += len(data)
@@ -237,8 +266,12 @@ class HTTPOnly(HTTP):
                 method, path, ver = header.groups()
                 host_value = host.group(1)
                 data = (
-                    method + b' http://' + host_value + path + b' ' + ver + b'\r\nHost: ' + host_value
-                    + (b'\r\nProxy-Authorization: Basic ' + base64.b64encode(rauth) if rauth else b'')
+                    method + b' http://' + host_value + path + b' ' + ver
+                    + b'\r\nHost: ' + host_value
+                    + (
+                        b'\r\nProxy-Authorization: Basic ' + base64.b64encode(rauth)
+                        if rauth else b''
+                    )
                     + b'\r\n\r\n' + buffer[pos + 4:]
                 )
                 buffer.clear()
@@ -261,7 +294,10 @@ class H2(HTTP):
             await writer.headers
         headers = writer.headers.result()
         headers = {i.decode().lower(): j.decode() for i, j in headers}
-        lines = '\r\n'.join(i for i in headers if not i.startswith('proxy-') and not i.startswith(':'))
+        lines = '\r\n'.join(
+            i for i in headers
+            if not i.startswith('proxy-') and not i.startswith(':')
+        )
 
         # Keep the common HTTP reply callback shape for the protocol interface.
         # pylint: disable=unused-argument
@@ -309,7 +345,9 @@ class HTTPAdmin(HTTP):
     async def accept(self, reader, user, writer, **kw):  # pylint: disable=too-many-locals
         """Authenticate, bound, and dispatch one administration request."""
         lines = await transport.read_until(reader, b'\r\n\r\n', limit=self.MAX_HEADER_SIZE)
-        method, path, ver, filtered_headers, _, proxy_authorization, _ = parse_http_request_head(lines[:-4])
+        (
+            method, path, ver, filtered_headers, _, proxy_authorization, _
+        ) = parse_http_request_head(lines[:-4])
         headers, lines = decode_http_header_block(filtered_headers)
 
         # Keep the common HTTP reply callback shape for the protocol interface.
@@ -323,11 +361,17 @@ class HTTPAdmin(HTTP):
 
         users = kw.get('users') or ()
         authorization = next(
-            (value for key, value in headers.items() if key.casefold() in {'authorization', 'proxy-authorization'}),
+            (
+                value for key, value in headers.items()
+                if key.casefold() in {'authorization', 'proxy-authorization'}
+            ),
             proxy_authorization,
         )
         authorized = next(
-            (candidate for candidate in users if authorization == 'Basic ' + base64.b64encode(candidate).decode()),
+            (
+                candidate for candidate in users
+                if authorization == 'Basic ' + base64.b64encode(candidate).decode()
+            ),
             None,
         )
         if authorized is None:
@@ -343,7 +387,12 @@ class HTTPAdmin(HTTP):
         except ValueError as exc:
             raise RequestError('Invalid Content-Length') from exc
         if content_length < 0 or content_length > admin.MAX_ADMIN_BODY:
-            await reply('413 Payload Too Large', f'{ver} 413 Payload Too Large\r\nConnection: close\r\n\r\n'.encode(), wait=True)
+            await reply(
+                '413 Payload Too Large',
+                f'{ver} 413 Payload Too Large\r\n'
+                'Connection: close\r\n\r\n'.encode(),
+                wait=True,
+            )
             raise RequestError('HTTP admin request body too large')
         content = b''
         if content_length > 0:
@@ -355,7 +404,14 @@ class HTTPAdmin(HTTP):
         if method in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']:
             for payload_path, handler in admin.httpget.items():
                 if payload_path == url.path:
-                    await handler(reply=reply, ver=ver, method=method, headers=headers, lines=lines, content=content)
+                    await handler(
+                        reply=reply,
+                        ver=ver,
+                        method=method,
+                        headers=headers,
+                        lines=lines,
+                        content=content,
+                    )
                     raise ConnectionClosed()
             raise RequestError(f'404 {method} {url.path}')
         raise RequestError(f'405 {method} not allowed')

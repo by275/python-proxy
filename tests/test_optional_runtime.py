@@ -147,10 +147,10 @@ class H2LoopbackTests(unittest.IsolatedAsyncioTestCase):
 
 def _write_quic_certificate(directory):
     """Create a short-lived localhost certificate for an aioquic fixture."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
+    from cryptography import x509  # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.primitives import hashes, serialization  # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.primitives.asymmetric import rsa  # pylint: disable=import-outside-toplevel
+    from cryptography.x509.oid import NameOID  # pylint: disable=import-outside-toplevel
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, '127.0.0.1')])
@@ -226,7 +226,9 @@ class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_quic_and_h3_round_trip_and_shutdown(self):
         for protocol_name in ('quic', 'h3'):
             with self.subTest(protocol=protocol_name):
-                async with quic_fixture(protocol_name) as (client, _listener, _handler, _echo, echo_port):
+                async with quic_fixture(protocol_name) as (
+                    client, _listener, _handler, _echo, echo_port
+                ):
                     for index in range(3):
                         reader, writer = await asyncio.wait_for(
                             client.tcp_connect('127.0.0.1', echo_port),
@@ -251,7 +253,9 @@ class QuicLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_reconnects_after_remote_quic_connection_termination(self):
         for protocol_name in ('quic', 'h3'):
             with self.subTest(protocol=protocol_name):
-                async with quic_fixture(protocol_name) as (client, listener, handler, _echo, echo_port):
+                async with quic_fixture(protocol_name) as (
+                    client, listener, handler, _echo, echo_port
+                ):
                     reader, writer = await asyncio.wait_for(
                         client.tcp_connect('127.0.0.1', echo_port),
                         5,

@@ -7,6 +7,7 @@ import unittest
 
 import pproxy
 from pproxy import app, proto, server
+from pproxy.cipher import get_cipher
 from pproxy.config import ProxyConfig, netloc_split
 from pproxy.errors import ProtocolError
 from pproxy.protocols import address as address_protocol
@@ -87,8 +88,6 @@ class ParserContractTests(unittest.TestCase):
         rule = server.compile_rule("{^example\\.test$}")
         self.assertIsNotNone(rule("example.test"))
         self.assertIsNone(rule("other.test"))
-
-        from pproxy.cipher import get_cipher
 
         error, cipher = get_cipher("chacha20:test")
         self.assertIsNone(error)

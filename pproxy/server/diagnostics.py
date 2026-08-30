@@ -13,7 +13,9 @@ async def test_url(url, rserver):
     """Fetch a URL through every configured remote and print the response."""
     url = urllib.parse.urlparse(url)
     require(url.scheme in ('http', 'https'), f'Unknown scheme {url.scheme}')
-    host_name, port = proto.netloc_split(url.netloc, default_port=80 if url.scheme == 'http' else 443)
+    host_name, port = proto.netloc_split(
+        url.netloc, default_port=80 if url.scheme == 'http' else 443
+    )
     initbuf = (
         f'GET {url.path or "/"} HTTP/1.1\r\n'
         f'Host: {host_name}\r\n'
@@ -28,7 +30,14 @@ async def test_url(url, rserver):
             raise UpstreamError(f'Connection timeout {rserver}') from exc
         try:
             reader, writer = await roption.prepare_connection(reader, writer, host_name, port)
-        except (ConnectionError, OSError, EOFError, TimeoutError, ValueError, ProtocolError) as exc:
+        except (
+            ConnectionError,
+            OSError,
+            EOFError,
+            TimeoutError,
+            ValueError,
+            ProtocolError,
+        ) as exc:
             writer.close()
             raise UpstreamError('Unknown remote protocol') from exc
         if url.scheme == 'https':
@@ -57,5 +66,9 @@ def print_server_started(option, server, print_fn):
         host = local_addr[0]
         port = local_addr[1]
         family = sock.family
-        ipversion = 'ipv4' if family == socket.AF_INET else 'ipv6' if family == socket.AF_INET6 else 'ipv?'
+        ipversion = (
+            'ipv4' if family == socket.AF_INET
+            else 'ipv6' if family == socket.AF_INET6
+            else 'ipv?'
+        )
         print_fn(option, f'{ipversion} {host}:{port}')

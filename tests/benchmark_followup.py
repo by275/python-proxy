@@ -16,6 +16,8 @@ import pyperf
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+# These imports follow the source-tree bootstrap above for direct execution.
+# pylint: disable=wrong-import-position
 from pproxy import cipher as cipher_runtime
 from pproxy import server
 from pproxy import websocket as websocket_runtime
@@ -33,10 +35,12 @@ class ProbeReader:
         self._buffer = bytearray()
 
     async def read(self, size):
+        """Return the requested prefix of the synthetic payload."""
         return self.payload[:size]
 
 
 def time_argument_expansion(loops):
+    """Measure the cost of expanding proxy state into callback arguments."""
     proxy = server.proxies_by_uri("http://127.0.0.1:0")
     args = {"rserver": [], "verbose": server.DUMMY, "ruport": False}
     started = time.perf_counter()
@@ -48,6 +52,7 @@ def time_argument_expansion(loops):
 
 
 def time_argument_expansion_from_cached_mapping(loops):
+    """Measure argument expansion when the proxy mapping is cached."""
     proxy = server.proxies_by_uri("http://127.0.0.1:0")
     proxy_values = vars(proxy)
     args = {"rserver": [], "verbose": server.DUMMY, "ruport": False}
@@ -60,6 +65,7 @@ def time_argument_expansion_from_cached_mapping(loops):
 
 
 async def guess_protocols(protocols, payload):
+    """Run protocol detection against a synthetic initial payload."""
     for protocol in protocols:
         reader = ProbeReader(payload)
         if await protocol.guess(reader):
@@ -68,6 +74,7 @@ async def guess_protocols(protocols, payload):
 
 
 def time_protocol_guess(loops, protocol_count):
+    """Measure protocol detection for one, two, and four candidates."""
     protocol_sets = {
         1: (socks.Socks5,),
         2: (http.HTTP, socks.Socks5),
@@ -91,6 +98,7 @@ def time_protocol_guess(loops, protocol_count):
 
 
 def time_task_creation(loops):
+    """Measure creation and completion of ordinary asyncio tasks."""
     loop = asyncio.new_event_loop()
     started = time.perf_counter()
 
@@ -106,6 +114,7 @@ def time_task_creation(loops):
 
 
 def time_registry_task_creation(loops):
+    """Measure task creation through the project task registry."""
     loop = asyncio.new_event_loop()
     registry_owner = TaskRegistry()
     started = time.perf_counter()
@@ -123,6 +132,7 @@ def time_registry_task_creation(loops):
 
 
 def time_task_group(loops):
+    """Measure the setup and teardown cost of an asyncio task group."""
     loop = asyncio.new_event_loop()
     started = time.perf_counter()
 
@@ -139,6 +149,7 @@ def time_task_group(loops):
 
 
 def time_task_group_cancellation(loops):
+    """Measure task-group cancellation and exception propagation."""
     loop = asyncio.new_event_loop()
     started = time.perf_counter()
 
@@ -165,6 +176,7 @@ def time_task_group_cancellation(loops):
 
 
 def time_statistics_callbacks(loops):
+    """Measure the callback allocation used by verbose statistics."""
     def modstat(_user, _remote_ip, _host):
         def update(_amount):
             return None
@@ -180,6 +192,7 @@ def time_statistics_callbacks(loops):
 
 
 def time_http_header_parsing(loops):
+    """Measure parsing of a representative HTTP request header block."""
     request = (
         b"GET http://example.com/path?q=1 HTTP/1.1\r\n"
         b"Host: example.com\r\n"
@@ -195,20 +208,25 @@ def time_http_header_parsing(loops):
     return time.perf_counter() - started
 
 
-class MessageReader:
+class MessageReader:  # pylint: disable=too-few-public-methods
+    """Count messages delivered by the WebSocket stream adapter."""
     def __init__(self):
         self.messages = 0
 
     def feed_data(self, _data):
+        """Count one parsed message."""
         self.messages += 1
 
 
-class MessageWriter:
+class MessageWriter:  # pylint: disable=too-few-public-methods
+    """Discard writes while exposing the writer surface under benchmark."""
     def write(self, _data):
+        """Discard one benchmark write."""
         return None
 
 
 def time_websocket_frame_parsing(loops):
+    """Measure parsing of a small binary WebSocket frame."""
     reader = MessageReader()
     stream = websocket_runtime.WebSocketStream(reader, MessageWriter())
     payload = b"proxy websocket payload"
@@ -222,6 +240,7 @@ def time_websocket_frame_parsing(loops):
 
 
 def time_socks_address_parsing(loops):
+    """Measure decoding of a domain-name SOCKS address."""
     address = b"\x0bexample.com" + (443).to_bytes(2, "big")
     started = time.perf_counter()
     for _ in range(loops):
@@ -232,6 +251,7 @@ def time_socks_address_parsing(loops):
 
 
 def time_udp_bookkeeping(loops):
+    """Measure UDP association touch and eviction bookkeeping."""
     proxy = server.ProxyDirect()
     protocol = type("Protocol", (), {"transport": None})()
     started = time.perf_counter()
@@ -242,6 +262,7 @@ def time_udp_bookkeeping(loops):
 
 
 def time_pure_python_cipher_packet(loops):
+    """Measure packet encryption through the pure-Python cipher backend."""
     cipher_class = pure_cipher_map["chacha20"]
     packet_cipher = PacketCipher(cipher_class, b"benchmark-key", "chacha20")
     payload = b"x" * 256
@@ -253,6 +274,7 @@ def time_pure_python_cipher_packet(loops):
 
 
 def time_accelerated_cipher_packet(loops):
+    """Measure packet encryption through the optional accelerated backend."""
     cipher_class = cipher_runtime.MAP.get("chacha20")
     if cipher_class is None:
         return 0.0
@@ -266,6 +288,7 @@ def time_accelerated_cipher_packet(loops):
 
 
 def main():
+    """Register and run all pyperf microbenchmarks."""
     runner = pyperf.Runner()
     runner.bench_time_func("connection_vars_kwargs", time_argument_expansion)
     runner.bench_time_func("connection_cached_mapping", time_argument_expansion_from_cached_mapping)

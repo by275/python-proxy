@@ -94,7 +94,11 @@ class AEADCipher(BaseCipher):
         okm = bytearray()
         output_block = b''
         for counter in range(blocks_needed):
-            output_block = hmac.new(randkey, output_block + b'ss-subkey' + bytes([counter+1]), hashlib.sha1).digest()
+            output_block = hmac.new(
+                randkey,
+                output_block + b'ss-subkey' + bytes([counter + 1]),
+                hashlib.sha1,
+            ).digest()
             okm.extend(output_block)
         self.key = bytes(okm[:self.KEY_LENGTH])
         self._nonce = 0
@@ -117,13 +121,23 @@ class AEADCipher(BaseCipher):
                 if self._declen is None:
                     if len(self._buffer) < 2+self.TAG_LENGTH:
                         break
-                    self._declen = int.from_bytes(self.decrypt_and_verify(self._buffer[:2], self._buffer[2:2+self.TAG_LENGTH]), 'big')
+                    self._declen = int.from_bytes(
+                        self.decrypt_and_verify(
+                            self._buffer[:2], self._buffer[2:2 + self.TAG_LENGTH]
+                        ),
+                        'big',
+                    )
                     require(self._declen <= self.PACKET_LIMIT)
                     del self._buffer[:2+self.TAG_LENGTH]
                 else:
                     if len(self._buffer) < self._declen+self.TAG_LENGTH:
                         break
-                    ret.extend(self.decrypt_and_verify(self._buffer[:self._declen], self._buffer[self._declen:self._declen+self.TAG_LENGTH]))
+                    ret.extend(
+                        self.decrypt_and_verify(
+                            self._buffer[:self._declen],
+                            self._buffer[self._declen:self._declen + self.TAG_LENGTH],
+                        )
+                    )
                     del self._buffer[:self._declen+self.TAG_LENGTH]
                     self._declen = None
         # Crypto backends expose different exception classes; any failure must
@@ -262,7 +276,9 @@ class AES_256_GCM_Cipher(AEADCipher):
         return self.cipher_new(self.nonce).encrypt_and_digest(buffer)
     def setup(self):
         from Crypto.Cipher import AES
-        self.cipher_new = lambda nonce: AES.new(self.key, AES.MODE_GCM, nonce=nonce, mac_len=self.TAG_LENGTH)
+        self.cipher_new = lambda nonce: AES.new(
+            self.key, AES.MODE_GCM, nonce=nonce, mac_len=self.TAG_LENGTH
+        )
 class AES_192_GCM_Cipher(AES_256_GCM_Cipher):
     """AES-192 GCM authenticated-encryption variant."""
 
@@ -359,7 +375,9 @@ class StreamCipherAdapter:  # pylint: disable=too-many-instance-attributes
             data = self.reader_cipher.stream_buffer + data
             if len(data) >= self.reader_cipher.IV_LENGTH:
                 self.reader_cipher.setup_iv(data[:self.reader_cipher.IV_LENGTH])
-                return self.pdecrypt(self.reader_cipher.decrypt(data[self.reader_cipher.IV_LENGTH:]))
+                return self.pdecrypt(
+                    self.reader_cipher.decrypt(data[self.reader_cipher.IV_LENGTH:])
+                )
             self.reader_cipher.stream_buffer = data
             return b''
         return self.pdecrypt(self.reader_cipher.decrypt(data))
@@ -444,7 +462,11 @@ def get_cipher(cipher_key):
     from .cipherpy import MAP as MAP_PY
     cipher, key = cipher_key.split(':')
     cipher_name, ota, _ = cipher.partition('!')
-    if cipher_name not in MAP and cipher_name not in MAP_PY and not (cipher_name.endswith('-py') and cipher_name[:-3] in MAP_PY):
+    if (
+        cipher_name not in MAP
+        and cipher_name not in MAP_PY
+        and not (cipher_name.endswith('-py') and cipher_name[:-3] in MAP_PY)
+    ):
         return f'existing ciphers: {sorted(set(MAP)|set(MAP_PY))}', None
     key, ota = key.encode(), bool(ota) if ota else False
     cipher = MAP.get(cipher_name)

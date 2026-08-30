@@ -31,7 +31,9 @@ class MacSetting:  # pylint: disable=too-few-public-methods
                 break
         if self.listen is None:
             print('No server listen on localhost by http/socks5')
-        ret = subprocess.check_output(['/usr/sbin/networksetup', '-listnetworkserviceorder']).decode()
+        ret = subprocess.check_output(
+            ['/usr/sbin/networksetup', '-listnetworkserviceorder']
+        ).decode()
         en0 = next(filter(lambda x: 'Device: en0' in x, ret.split('\n\n')), None)
         if en0 is None:
             print('Cannot find en0 device name!\n\nInfo:\n\n'+ret)
@@ -42,7 +44,10 @@ class MacSetting:  # pylint: disable=too-few-public-methods
             return
         self.device = line[3:].strip()
         for mode in self.modes:
-            subprocess.check_call(['/usr/sbin/networksetup', mode, self.device, 'localhost', str(self.listen.port), 'off'])
+            subprocess.check_call([
+                '/usr/sbin/networksetup', mode, self.device,
+                'localhost', str(self.listen.port), 'off',
+            ])
         print(f'System proxy setting -> {self.mode_name} localhost:{self.listen.port}')
     def clear(self):
         """Disable the proxy modes previously enabled by this instance."""
@@ -69,21 +74,28 @@ class WindowsSetting:  # pylint: disable=too-few-public-methods
                 break
         if self.listen is None:
             print('No server listen on localhost by http')
-        import winreg  # pylint: disable=import-error,import-outside-toplevel  # Windows-only standard library
+        import winreg  # pylint: disable=import-error,import-outside-toplevel
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
         value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
         require(regtype == winreg.REG_BINARY)
         server = f'localhost:{self.listen.port}'.encode()
         bypass = '<local>'.encode()
         counter = int.from_bytes(value[4:8], 'little') + 1
-        value = value[:4] + struct.pack('<III', counter, 3, len(server)) + server + struct.pack('<I', len(bypass)) + bypass + b'\x00'*36
+        value = (
+            value[:4]
+            + struct.pack('<III', counter, 3, len(server))
+            + server
+            + struct.pack('<I', len(bypass))
+            + bypass
+            + b'\x00' * 36
+        )
         winreg.SetValueEx(key, self.SUBKEY, None, regtype, value)
         winreg.CloseKey(key)
     def clear(self):
         """Restore the Windows proxy registry value to its disabled state."""
         if self.listen is None:
             return
-        import winreg  # pylint: disable=import-error,import-outside-toplevel  # Windows-only standard library
+        import winreg  # pylint: disable=import-error,import-outside-toplevel
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY, 0, winreg.KEY_ALL_ACCESS)
         value, regtype = winreg.QueryValueEx(key, self.SUBKEY)
         require(regtype == winreg.REG_BINARY)

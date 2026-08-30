@@ -147,7 +147,11 @@ class SS(SSR):
         host_name, port, data = await socks_address_stream(reader, header[0])
         require(ota or not reader_cipher or not reader_cipher.ota, 'SS client must support OTA')
         if ota and reader_cipher:
-            checksum = hmac.new(reader_cipher.iv + reader_cipher.key, header + data, hashlib.sha1).digest()
+            checksum = hmac.new(
+                reader_cipher.iv + reader_cipher.key,
+                header + data,
+                hashlib.sha1,
+            ).digest()
             require(
                 checksum[:10] == await transport.read_exactly(reader, 10),
                 'Unknown OTA checksum',
@@ -162,7 +166,11 @@ class SS(SSR):
         writer_remote.write(rauth)
         if writer_cipher_r and writer_cipher_r.ota:
             rdata = b'\x13' + packstr(host_name.encode()) + port.to_bytes(2, 'big')
-            checksum = hmac.new(writer_cipher_r.iv + writer_cipher_r.key, rdata, hashlib.sha1).digest()
+            checksum = hmac.new(
+                writer_cipher_r.iv + writer_cipher_r.key,
+                rdata,
+                hashlib.sha1,
+            ).digest()
             writer_remote.write(rdata + checksum[:10])
             self.patch_ota_writer(writer_cipher_r, writer_remote)
         else:
@@ -232,7 +240,9 @@ class Socks4(BaseProtocol):
     async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):
         """Open a SOCKS4 tunnel through the remote proxy."""
         loop = asyncio.get_running_loop()
-        ip = socket.inet_aton((await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0])
+        ip = socket.inet_aton(
+            (await loop.getaddrinfo(host_name, port, family=socket.AF_INET))[0][4][0]
+        )
         writer_remote.write(b'\x04\x01' + port.to_bytes(2, 'big') + ip + rauth + b'\x00')
         require(await transport.read_exactly(reader_remote, 2) == b'\x00\x5a')
         await transport.read_exactly(reader_remote, 6)
@@ -256,7 +266,10 @@ class Socks5(BaseProtocol):
             if b'\x02' not in methods:
                 raise AuthenticationError('Unauthorized SOCKS')
             writer.write(b'\x05\x02')
-            require((await transport.read_exactly(reader, 1))[0] == 1, 'Unknown SOCKS auth')
+            require(
+                (await transport.read_exactly(reader, 1))[0] == 1,
+                'Unknown SOCKS auth',
+            )
             u = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             p = await transport.read_exactly(reader, (await transport.read_exactly(reader, 1))[0])
             user = u + b':' + p
@@ -269,28 +282,42 @@ class Socks5(BaseProtocol):
             writer.write(b'\x05\x00')
         if users:
             authtable.set_authed(user)
-        require(await transport.read_exactly(reader, 3) == b'\x05\x01\x00', 'Unknown SOCKS protocol')
+        require(
+            await transport.read_exactly(reader, 3) == b'\x05\x01\x00',
+            'Unknown SOCKS protocol',
+        )
         header = await transport.read_exactly(reader, 1)
         host_name, port, data = await socks_address_stream(reader, header[0])
         writer.write(b'\x05\x00\x00' + header + data)
         return user, host_name, port
 
-    async def connect(self, reader_remote, writer_remote, rauth, host_name, port, **kw):  # pylint: disable=unused-argument
+    async def connect(
+        self, reader_remote, writer_remote, rauth, host_name, port, **kw
+    ):  # pylint: disable=unused-argument
         """Open a SOCKS5 tunnel through the remote proxy."""
         if rauth:
             writer_remote.write(b'\x05\x01\x02')
             require(await transport.read_exactly(reader_remote, 2) == b'\x05\x02')
             writer_remote.write(b'\x01' + b''.join(packstr(item) for item in rauth.split(b':', 1)))
-            require(await transport.read_exactly(reader_remote, 2) == b'\x01\x00', 'Unknown SOCKS auth')
+            require(
+                await transport.read_exactly(reader_remote, 2) == b'\x01\x00',
+                'Unknown SOCKS auth',
+            )
         else:
             writer_remote.write(b'\x05\x01\x00')
             require(await transport.read_exactly(reader_remote, 2) == b'\x05\x00')
-        writer_remote.write(b'\x05\x01\x00\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big'))
+        writer_remote.write(
+            b'\x05\x01\x00\x03' + packstr(host_name.encode()) + port.to_bytes(2, 'big')
+        )
         require(await transport.read_exactly(reader_remote, 3) == b'\x05\x00\x00')
         header = (await transport.read_exactly(reader_remote, 1))[0]
         await transport.read_exactly(
             reader_remote,
-            6 if header == 1 else 18 if header == 4 else (await transport.read_exactly(reader_remote, 1))[0] + 2,
+            (
+                6 if header == 1
+                else 18 if header == 4
+                else (await transport.read_exactly(reader_remote, 1))[0] + 2
+            ),
         )
 
     def udp_accept(self, data, **kw):

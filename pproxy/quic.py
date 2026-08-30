@@ -195,7 +195,10 @@ class ProxyQUIC(ProxySimple):  # pylint: disable=too-many-instance-attributes
                     """Dispatch control and UDP stream events."""
                     if isinstance(event, aioquic.quic.events.ConnectionTerminated):
                         owner.connection_terminated(handshake, 'QUIC connection terminated')
-                    elif isinstance(event, aioquic.quic.events.StreamDataReceived) and event.stream_id in owner.quic_udp_replies:
+                    elif (
+                        isinstance(event, aioquic.quic.events.StreamDataReceived)
+                        and event.stream_id in owner.quic_udp_replies
+                    ):
                         owner.quic_udp_replies[event.stream_id](owner.udp_packet_unpack(event.data))
                         return
                     super().quic_event_received(event)
@@ -344,7 +347,10 @@ class ProxyH3(ProxyQUIC):
                 """Send encoded response headers for this stream."""
                 if self.closed or quic_is_closed(conn):
                     return
-                conn.http.send_headers(stream_id, [(key.encode(), value.encode()) for key, value in headers])
+                encoded_headers = [
+                    (key.encode(), value.encode()) for key, value in headers
+                ]
+                conn.http.send_headers(stream_id, encoded_headers)
                 conn.transmit()
 
         writer = StreamWriter()
@@ -400,7 +406,10 @@ class ProxyH3(ProxyQUIC):
                                 writer.close()
 
                         owner.task_registry.create_task(handle_stream(), name='h3-stream')
-                elif isinstance(event, aioquic.h3.events.DataReceived) and event.stream_id in self.streams:
+                elif (
+                    isinstance(event, aioquic.h3.events.DataReceived)
+                    and event.stream_id in self.streams
+                ):
                     reader, writer = self.streams[event.stream_id]
                     if event.data:
                         reader.feed_data(event.data)

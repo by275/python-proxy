@@ -135,7 +135,7 @@ class SSHIntegrationTests(unittest.IsolatedAsyncioTestCase):
     """Exercise SSH forwarding and host-key policy with an in-process server."""
 
     async def asyncSetUp(self):
-        import asyncssh
+        import asyncssh  # pylint: disable=import-outside-toplevel  # optional backend
 
         self.asyncssh = asyncssh
         self.server_key = asyncssh.generate_private_key('ssh-ed25519')

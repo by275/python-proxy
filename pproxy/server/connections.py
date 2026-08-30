@@ -28,7 +28,8 @@ from .common import (
 )
 
 
-class ProxyDirect:
+# The direct strategy owns listener, UDP, and task lifecycle state together.
+class ProxyDirect:  # pylint: disable=too-many-instance-attributes
     """Direct TCP and UDP connection strategy."""
 
     def __init__(self, lbind=None):
@@ -177,7 +178,9 @@ class ProxyDirect:
 
     async def wait_open_connection(self, host, port, local_addr, family):
         """Open a direct TCP stream with the requested local binding."""
-        return await asyncio.open_connection(host=host, port=port, local_addr=local_addr, family=family)
+        return await asyncio.open_connection(
+            host=host, port=port, local_addr=local_addr, family=family
+        )
 
     async def open_connection(self, host, port, local_addr, lbind, timeout=SOCKET_TIMEOUT):
         """Resolve binding settings and open a timeout-bounded TCP stream."""
@@ -185,7 +188,11 @@ class ProxyDirect:
             local_addr if self.lbind == 'in' else (self.lbind, 0) if self.lbind else
             local_addr if lbind == 'in' else (lbind, 0) if lbind else None
         )
-        family = 0 if local_addr is None else socket.AF_INET6 if ':' in local_addr[0] else socket.AF_INET
+        family = (
+            0 if local_addr is None
+            else socket.AF_INET6 if ':' in local_addr[0]
+            else socket.AF_INET
+        )
         wait = self.wait_open_connection(host, port, local_addr, family)
         reader, writer = await asyncio.wait_for(wait, timeout=timeout)
         return reader, writer
@@ -219,7 +226,8 @@ class ProxyDirect:
 DIRECT = ProxyDirect()
 
 
-class ProxySimple(ProxyDirect):
+# This state mirrors the parsed proxy configuration and is accessed by adapters.
+class ProxySimple(ProxyDirect):  # pylint: disable=too-many-instance-attributes
     """Proxy connection strategy with a configured protocol and optional jump."""
 
     # This constructor mirrors the parsed proxy configuration fields.
@@ -244,7 +252,8 @@ class ProxySimple(ProxyDirect):
 
     def logtext(self, host, port):
         """Format this proxy strategy and its jump chain for diagnostics."""
-        return f' -> {self.rproto.name+("+ssl" if self.sslclient else "")} {self.bind}' + self.jump.logtext(host, port)
+        protocol = self.rproto.name + ('+ssl' if self.sslclient else '')
+        return f' -> {protocol} {self.bind}' + self.jump.logtext(host, port)
 
     def match_rule(self, host, port):
         """Return whether the configured destination rule permits a request."""
@@ -308,13 +317,20 @@ class ProxySimple(ProxyDirect):
                 owner.task_registry.create_task(handle_datagram(), name='udp-datagram')
 
         loop = asyncio.get_running_loop()
-        return await loop.create_datagram_endpoint(Protocol, local_addr=(self.host_name, self.port))
+        return await loop.create_datagram_endpoint(
+            Protocol, local_addr=(self.host_name, self.port)
+        )
 
     async def wait_open_connection(self, host, port, local_addr, family):
         """Open either the configured Unix or TCP upstream endpoint."""
         if self.unix:
             return await asyncio.open_unix_connection(path=self.bind)
-        return await asyncio.open_connection(host=self.host_name, port=self.port, local_addr=local_addr, family=family)
+        return await asyncio.open_connection(
+            host=self.host_name,
+            port=self.port,
+            local_addr=local_addr,
+            family=family,
+        )
 
     async def prepare_connection(self, reader_remote, writer_remote, host, port):
         """Apply TLS, cipher, protocol, and jump preparation in order."""
@@ -326,7 +342,9 @@ class ProxySimple(ProxyDirect):
             self.host_name,
             task_registry=self.task_registry,
         )
-        _, writer_cipher_r = await prepare_ciphers(self.cipher, reader_remote, writer_remote, self.bind)
+        _, writer_cipher_r = await prepare_ciphers(
+            self.cipher, reader_remote, writer_remote, self.bind
+        )
         whost, wport = self.jump.destination(host, port)
         await self.rproto.connect(
             reader_remote=reader_remote,
@@ -475,7 +493,15 @@ class ProxyBackward(ProxySimple):
                 errwait = 0
                 self.writers.discard(writer)
                 writer = None
-            except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
+            except (
+                ConnectionClosed,
+                ProtocolError,
+                ConnectionError,
+                OSError,
+                EOFError,
+                asyncio.TimeoutError,
+                ValueError,
+            ):
                 try:
                     if writer is not None:
                         writer.close()
@@ -495,7 +521,15 @@ class ProxyBackward(ProxySimple):
             if auth:
                 try:
                     require(auth == (await transport.read_exactly(reader, len(auth))))
-                except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
+                except (
+                    ConnectionClosed,
+                    ProtocolError,
+                    ConnectionError,
+                    OSError,
+                    EOFError,
+                    asyncio.TimeoutError,
+                    ValueError,
+                ):
                     return
             await self.conn.put(
                 (reader, writer, self.tasks.create_task(self.watch_connection(reader, writer)))
@@ -516,7 +550,15 @@ async def check_server_alive(interval, rserver, verbose):
                 _, writer = await remote.open_connection(None, None, None, None, timeout=3)
             except asyncio.CancelledError:
                 return
-            except (ConnectionClosed, ProtocolError, ConnectionError, OSError, EOFError, asyncio.TimeoutError, ValueError):
+            except (
+                ConnectionClosed,
+                ProtocolError,
+                ConnectionError,
+                OSError,
+                EOFError,
+                asyncio.TimeoutError,
+                ValueError,
+            ):
                 if remote.alive:
                     verbose(f'{remote.rproto.name} {remote.bind} -> OFFLINE')
                     remote.alive = False

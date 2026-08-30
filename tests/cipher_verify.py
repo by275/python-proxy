@@ -7,11 +7,17 @@ import time
 from pproxy.cipher import MAP
 from pproxy.cipherpy import MAP as MAP_PY
 
-def test_both_cipher(cipher_a, cipher_b, size=4*1024, repeat=16):
+def test_both_cipher(  # pylint: disable=too-many-locals
+    cipher_a, cipher_b, size=4 * 1024, repeat=16
+):
+    """Compare accelerated and pure-Python output for one cipher pair."""
     print('Testing', cipher_b.__name__, '...')
     t1 = t2 = 0
     for _ in range(repeat):
-        assert cipher_a.KEY_LENGTH == cipher_b.KEY_LENGTH and cipher_a.IV_LENGTH == cipher_b.IV_LENGTH
+        assert (
+            cipher_a.KEY_LENGTH == cipher_b.KEY_LENGTH
+            and cipher_a.IV_LENGTH == cipher_b.IV_LENGTH
+        )
         key = os.urandom(cipher_a.KEY_LENGTH)
         iv = os.urandom(cipher_a.IV_LENGTH)
         t = time.perf_counter()
@@ -50,6 +56,7 @@ def test_both_cipher(cipher_a, cipher_b, size=4*1024, repeat=16):
     print('Passed', t1, t2)
 
 def test_cipher(cipher_class, known_vectors, size=4*1024, repeat=16):
+    """Verify or interactively create vectors for a pure-Python cipher."""
     if cipher_class.__name__ not in known_vectors:
         if input('Correct now? (Y/n)').upper() != 'Y':
             return

@@ -83,7 +83,7 @@ class ProxyH2(ProxySimple):
                 stream_writer.window_update()
         return True
 
-    async def handler(  # pylint: disable=import-outside-toplevel,unused-argument
+    async def handler(  # pylint: disable=import-outside-toplevel,unused-argument,too-many-locals
         self,
         reader,
         writer,
@@ -118,7 +118,13 @@ class ProxyH2(ProxySimple):
                     if not data:
                         break
                     events = conn.receive_data(data)
-                except (h2.exceptions.H2Error, ConnectionError, OSError, EOFError, ValueError) as exc:
+                except (
+                    h2.exceptions.H2Error,
+                    ConnectionError,
+                    OSError,
+                    EOFError,
+                    ValueError,
+                ) as exc:
                     if self.handshake is not None and not self.handshake.done():
                         self.handshake.set_exception(exc)
                     break

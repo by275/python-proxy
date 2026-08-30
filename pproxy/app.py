@@ -23,22 +23,56 @@ def _build_parser():
         + f'\nSupported protocols: {supported_protocols}',
         epilog=f'Online help: <{__url__}>',
     )
-    parser.add_argument('-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri, help='tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)')
-    parser.add_argument('-r', dest='rserver', default=[], action='append', type=runtime.proxies_by_uri, help='tcp remote server uri (default: direct)')
-    parser.add_argument('-ul', dest='ulisten', default=[], action='append', type=runtime.proxies_by_uri, help='udp server setting uri (default: none)')
-    parser.add_argument('-ur', dest='urserver', default=[], action='append', type=runtime.proxies_by_uri, help='udp remote server uri (default: direct)')
+    parser.add_argument(
+        '-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri,
+        help='tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)',
+    )
+    parser.add_argument(
+        '-r', dest='rserver', default=[], action='append', type=runtime.proxies_by_uri,
+        help='tcp remote server uri (default: direct)',
+    )
+    parser.add_argument(
+        '-ul', dest='ulisten', default=[], action='append', type=runtime.proxies_by_uri,
+        help='udp server setting uri (default: none)',
+    )
+    parser.add_argument(
+        '-ur', dest='urserver', default=[], action='append', type=runtime.proxies_by_uri,
+        help='udp remote server uri (default: direct)',
+    )
     parser.add_argument('-b', dest='block', type=runtime.compile_rule, help='block regex rules')
-    parser.add_argument('-a', dest='alived', default=0, type=int, help='interval to check remote alive (default: no check)')
-    parser.add_argument('-s', dest='salgorithm', default='fa', choices=('fa', 'rr', 'rc', 'lc'), help='scheduling algorithm (default: first_available)')
-    parser.add_argument('-d', dest='debug', action='count', help='turn on debug to see tracebacks (default: no debug)')
+    parser.add_argument(
+        '-a', dest='alived', default=0, type=int,
+        help='interval to check remote alive (default: no check)',
+    )
+    parser.add_argument(
+        '-s', dest='salgorithm', default='fa', choices=('fa', 'rr', 'rc', 'lc'),
+        help='scheduling algorithm (default: first_available)',
+    )
+    parser.add_argument(
+        '-d', dest='debug', action='count',
+        help='turn on debug to see tracebacks (default: no debug)',
+    )
     parser.add_argument('-v', dest='v', action='count', help='print verbose output')
-    parser.add_argument('--ssl', dest='sslfile', help='certfile[,keyfile] if server listen in ssl mode')
+    parser.add_argument(
+        '--ssl', dest='sslfile', help='certfile[,keyfile] if server listen in ssl mode',
+    )
     parser.add_argument('--pac', help='http PAC path')
-    parser.add_argument('--get', dest='gets', default=[], action='append', help='http custom {path,file}')
-    parser.add_argument('--auth', dest='authtime', type=int, default=86400 * 30, help='re-auth time interval for same ip (default: 86400*30)')
-    parser.add_argument('--sys', action='store_true', help='change system proxy setting (mac, windows)')
-    parser.add_argument('--reuse', dest='ruport', action='store_true', help='set SO_REUSEPORT (Linux only)')
-    parser.add_argument('--daemon', dest='daemon', action='store_true', help='run as a daemon (Linux only)')
+    parser.add_argument(
+        '--get', dest='gets', default=[], action='append', help='http custom {path,file}',
+    )
+    parser.add_argument(
+        '--auth', dest='authtime', type=int, default=86400 * 30,
+        help='re-auth time interval for same ip (default: 86400*30)',
+    )
+    parser.add_argument(
+        '--sys', action='store_true', help='change system proxy setting (mac, windows)',
+    )
+    parser.add_argument(
+        '--reuse', dest='ruport', action='store_true', help='set SO_REUSEPORT (Linux only)',
+    )
+    parser.add_argument(
+        '--daemon', dest='daemon', action='store_true', help='run as a daemon (Linux only)',
+    )
     parser.add_argument('--test', help='test this url for all remote proxies and exit')
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     return parser
@@ -48,9 +82,19 @@ def _load_http_payloads(args):
     """Build PAC and custom HTTP payloads from parsed CLI options."""
     args.httpget = {}
     if args.pac:
-        pactext = 'function FindProxyForURL(u,h){' + (f'var b=/^(:?{args.block.__self__.pattern})$/i;if(b.test(h))return "";' if args.block else '')
+        block_rule = (
+            f'var b=/^(:?{args.block.__self__.pattern})$/i;'
+            'if(b.test(h))return "";'
+            if args.block else ''
+        )
+        pactext = 'function FindProxyForURL(u,h){' + block_rule
         for i, option in enumerate(args.rserver):
-            pactext += (f'var m{i}=/^(:?{option.rule.__self__.pattern})$/i;if(m{i}.test(h))' if option.rule else '') + 'return "PROXY %(host)s";'
+            rule = (
+                f'var m{i}=/^(:?{option.rule.__self__.pattern})$/i;'
+                f'if(m{i}.test(h))'
+                if option.rule else ''
+            )
+            pactext += rule + 'return "PROXY %(host)s";'
         args.httpget[args.pac] = pactext + 'return "DIRECT";}'
         args.httpget[args.pac + '/all'] = 'function FindProxyForURL(u,h){return "PROXY %(host)s";}'
         args.httpget[args.pac + '/none'] = 'function FindProxyForURL(u,h){return "DIRECT";}'
@@ -73,9 +117,15 @@ def _cipher_label(option, include_plugins=False):
 def _print_tcp_server(option, bind=None):
     """Print the address and protocol set for a TCP listener."""
     if runtime.is_unauthenticated_wildcard(option):
-        print('WARNING: wildcard listener has no authentication; use loopback or configure credentials')
+        print(
+            'WARNING: wildcard listener has no authentication; '
+            'use loopback or configure credentials'
+        )
     protocols = ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else '')
-    print('Serving on', (bind or option.bind), 'by', protocols, _cipher_label(option, include_plugins=True))
+    print(
+        'Serving on', (bind or option.bind), 'by', protocols,
+        _cipher_label(option, include_plugins=True),
+    )
 
 
 def _print_udp_server(option, bind=None):
@@ -87,7 +137,10 @@ def _print_udp_server(option, bind=None):
 def _print_backward_server(option, bind=None):
     """Print the address and protocol set for a backward listener."""
     protocols = ','.join(i.name for i in option.protos) + ('(SSL)' if option.sslclient else '')
-    print('Serving on', (bind or option.bind), 'backward by', protocols, _cipher_label(option, include_plugins=True))
+    print(
+        'Serving on', (bind or option.bind), 'backward by', protocols,
+        _cipher_label(option, include_plugins=True),
+    )
 
 
 def _start_tcp_servers(loop, args, servers):
@@ -97,7 +150,8 @@ def _start_tcp_servers(loop, args, servers):
             handler = loop.run_until_complete(option.start_server(vars(args)))
             runtime.print_server_started(option, handler, _print_tcp_server)
             servers.append(handler)
-        except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
+        # Keep starting other listeners when one configuration fails.
+        except Exception as ex:  # pylint: disable=broad-exception-caught
             _print_tcp_server(option)
             print('Start server failed.\n\t==>', ex)
 
@@ -109,7 +163,8 @@ def _start_udp_servers(loop, args, servers):
             handler, _protocol = loop.run_until_complete(option.udp_start_server(vars(args)))
             runtime.print_server_started(option, handler, _print_udp_server)
             servers.append(handler)
-        except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
+        # Keep starting other listeners when one configuration fails.
+        except Exception as ex:  # pylint: disable=broad-exception-caught
             _print_udp_server(option)
             print('Start server failed.\n\t==>', ex)
 
@@ -122,7 +177,8 @@ def _start_backward_servers(loop, args, servers):
                 handler = loop.run_until_complete(option.start_backward_client(vars(args)))
                 runtime.print_server_started(option, handler, _print_backward_server)
                 servers.append(handler)
-            except Exception as ex:  # pylint: disable=broad-exception-caught  # keep starting other listeners
+            # Keep starting other listeners when one configuration fails.
+            except Exception as ex:  # pylint: disable=broad-exception-caught
                 _print_backward_server(option)
                 print('Start server failed.\n\t==>', ex)
 
@@ -189,7 +245,13 @@ def main(args=None):  # pylint: disable=too-many-branches  # CLI lifecycle has i
 
             args.sys = sysproxy.setup(args)
         if args.alived > 0 and args.rserver:
-            loop.create_task(runtime.check_server_alive(args.alived, args.rserver, args.verbose if args.v else runtime.DUMMY))
+            loop.create_task(
+                runtime.check_server_alive(
+                    args.alived,
+                    args.rserver,
+                    args.verbose if args.v else runtime.DUMMY,
+                )
+            )
         try:
             loop.run_forever()
         except KeyboardInterrupt:

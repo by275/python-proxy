@@ -9,7 +9,8 @@ from .cipher import BaseCipher, AEADCipher
 from .errors import require
 
 # Names and constants mirror the algorithms and the existing cipher registry.
-# pylint: disable=invalid-name
+# This compatibility backend contains serialized constants and compact rounds.
+# pylint: disable=invalid-name,line-too-long
 
 class Table_Cipher(BaseCipher):
     """Table-based substitution cipher used by the legacy protocol."""

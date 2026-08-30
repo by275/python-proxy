@@ -1,6 +1,9 @@
 """Test server startup, shutdown, and task lifecycle behavior."""
 
 import asyncio
+import io
+import json
+import logging
 import unittest
 
 from pproxy import server
@@ -63,10 +66,6 @@ class BackwardLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(hasattr(proxy, 'aclose'))
 
     def test_structured_logging_is_opt_in(self):
-        import io
-        import json
-        import logging
-
         stream = io.StringIO()
         logger = configure_logging(logging.INFO, structured=True, stream=stream)
         logger.info('contract check')
