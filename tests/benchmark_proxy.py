@@ -15,6 +15,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import pproxy
 
 
+def proxy_uri(proto, port):
+    """Return the loopback URI used for one benchmark protocol."""
+    if proto == "ss":
+        return f"ss://chacha20:benchmark@127.0.0.1:{port}/,verify_simple"
+    return f"{proto}://127.0.0.1:{port}"
+
+
 async def echo_handler(reader, writer):
     try:
         while not reader.at_eof():
@@ -47,7 +54,7 @@ async def open_direct_connection(host, port):
 
 
 async def open_proxy_connection(proto, proxy_port, host, port):
-    conn = pproxy.Connection(f"{proto}://127.0.0.1:{proxy_port}")
+    conn = pproxy.Connection(proxy_uri(proto, proxy_port))
     return await conn.tcp_connect(host, port)
 
 
@@ -136,7 +143,7 @@ async def main():
         "--protocols",
         nargs="+",
         default=["direct", "http", "socks5"],
-        choices=["direct", "http", "socks4", "socks5"],
+        choices=["direct", "http", "socks4", "socks5", "ss"],
         help="client transport(s) to benchmark",
     )
     parser.add_argument(
@@ -172,7 +179,7 @@ async def main():
         for proto in args.protocols:
             if proto == "direct":
                 continue
-            proxy_servers[proto] = await start_pproxy_server(f"{proto}://127.0.0.1:0")
+            proxy_servers[proto] = await start_pproxy_server(proxy_uri(proto, 0))
 
         results = []
         for proto in args.protocols:
