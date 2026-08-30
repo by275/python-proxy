@@ -27,6 +27,10 @@ and protocol wire formats compatible for Python 3.12+ Git installations.
 - Generated the CLI supported-protocol list from registry metadata and aligned
   Git installation, optional extras, Python requirements, and container usage
   documentation.
+- Fixed HTTP/2 multiplexed stream writers not waking for connection-level flow
+  control updates after the shared send window was exhausted.
+- Added an encrypted plugin path to the loopback benchmark and recorded the
+  Phase 4 workload review without accepting unmeasured hot-path rewrites.
 
 ### Verification
 
