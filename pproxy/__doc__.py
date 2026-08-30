@@ -10,7 +10,7 @@ __description__ = "Proxy server that can tunnel among remote servers by regex ru
 __keywords__    = "proxy socks http shadowsocks shadowsocksr ssr redirect pf tunnel websocket cfp cipher ssl udp"
 __author__      = "Qian Wenjie"
 __email__       = "qianwenjie@gmail.com"
-__url__         = "https://github.com/qwj/python-proxy"
+__url__         = "https://github.com/by275/python-proxy"
 
 def _git_version(root):
     try:

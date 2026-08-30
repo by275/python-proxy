@@ -5,6 +5,7 @@ import asyncio
 import sys
 
 from . import admin
+from . import proto as protocol_registry
 from . import server as runtime
 from . import verbose as verbose_runtime
 from .__doc__ import __description__, __url__, __version__
@@ -12,9 +13,14 @@ from .__doc__ import __description__, __url__, __version__
 
 def _build_parser():
     """Create the command-line parser used by the legacy CLI."""
+    supported_protocols = ','.join(
+        name
+        for name, metadata in protocol_registry.PROTOCOL_METADATA.items()
+        if not metadata.transport_modifier
+    )
     parser = argparse.ArgumentParser(
         description=__description__
-        + '\nSupported protocols: http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel,ws,cfp',
+        + f'\nSupported protocols: {supported_protocols}',
         epilog=f'Online help: <{__url__}>',
     )
     parser.add_argument('-l', dest='listen', default=[], action='append', type=runtime.proxies_by_uri, help='tcp server uri (default: http+socks4+socks5://127.0.0.1:8080/)')

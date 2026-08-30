@@ -6,7 +6,7 @@ import socket
 import unittest
 
 import pproxy
-from pproxy import proto, server
+from pproxy import app, proto, server
 from pproxy.config import ProxyConfig, netloc_split
 from pproxy.errors import ProtocolError
 from pproxy.protocols import address as address_protocol
@@ -96,6 +96,13 @@ class ParserContractTests(unittest.TestCase):
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_cli_help_lists_all_registered_protocols(self):
+        help_text = app._build_parser().format_help()  # pylint: disable=protected-access
+        for name, metadata in proto.PROTOCOL_METADATA.items():
+            if not metadata.transport_modifier:
+                with self.subTest(protocol=name):
+                    self.assertIn(name, help_text)
+
     def test_server_facade_reexports_structured_components(self):
         self.assertIs(server.ProxyDirect, server_connections.ProxyDirect)
         self.assertIs(server.ProxySimple, server_connections.ProxySimple)
