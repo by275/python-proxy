@@ -82,6 +82,7 @@ jobs:
           --reports=no
           --score=no
           --exit-zero
+          --disable=duplicate-code,missing-class-docstring,missing-function-docstring,too-few-public-methods
           tests
 
       - name: Run proxy-level setup smoke benchmark
