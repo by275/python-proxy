@@ -31,6 +31,8 @@ and protocol wire formats compatible for Python 3.12+ Git installations.
   control updates after the shared send window was exhausted.
 - Added an encrypted plugin path to the loopback benchmark and recorded the
   Phase 4 workload review without accepting unmeasured hot-path rewrites.
+- Documented the legacy-cipher warning policy, AEAD recommendation, and the
+  review gates required before any compatibility removal.
 
 ### Verification
 

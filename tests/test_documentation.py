@@ -17,6 +17,7 @@ class DocumentationContractTests(unittest.TestCase):
         cls.readme = (cls.root / 'README.rst').read_text()
         cls.changelog = (cls.root / 'CHANGELOG.md').read_text()
         cls.runtime_api = (cls.root / 'docs/RUNTIME_API.md').read_text()
+        cls.security_policy = (cls.root / 'docs/SECURITY_POLICY.md').read_text()
 
     def test_readme_declares_supported_installation(self):
         self.assertIn('Python 3.12 or newer', self.readme)
@@ -35,6 +36,14 @@ class DocumentationContractTests(unittest.TestCase):
         self.assertIn('lifecycle', self.runtime_api.lower())
         self.assertIn('structured logging', self.runtime_api.lower())
         self.assertIn('lifecycle', self.changelog.lower())
+
+    def test_security_policy_matches_cipher_documentation(self):
+        self.assertIn('docs/SECURITY_POLICY.md', self.readme)
+        for name in ('rc4', 'rc4-md5', 'bf-cfb', 'cast5-cfb', 'des-cfb'):
+            with self.subTest(cipher=name):
+                self.assertIn(f'`{name}`', self.security_policy)
+        self.assertIn('chacha20-ietf-poly1305', self.security_policy)
+        self.assertIn('There is no scheduled removal release', self.security_policy)
 
     def test_project_repository_metadata_matches_installation_docs(self):
         with (self.root / 'pyproject.toml').open('rb') as pyproject_file:

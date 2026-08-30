@@ -3,9 +3,10 @@
 import asyncio
 import base64
 import unittest
+import warnings
 
 from pproxy import server
-from pproxy.cipher import get_cipher
+from pproxy.cipher import LEGACY_CIPHERS, get_cipher
 from pproxy.protocols.http import HTTPAdmin
 
 
@@ -51,6 +52,33 @@ class SecurityDefaultTests(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertIsNot(first.plugins[0], second.plugins[0])
         self.assertIs(factory.plugins[0].__class__, second.plugins[0].__class__)
+
+    def test_legacy_ciphers_warn_without_being_removed(self):
+        available = []
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            for name in sorted(LEGACY_CIPHERS):
+                with self.subTest(cipher=name):
+                    error, factory = get_cipher(f'{name}:test-key')
+                    if error:
+                        self.assertIsNone(factory)
+                        continue
+                    available.append(name)
+                    self.assertIsNotNone(factory)
+
+        self.assertEqual(len(caught), len(available))
+        for warning in caught:
+            self.assertIs(warning.category, UserWarning)
+            self.assertIn('retained for compatibility', str(warning.message))
+
+    def test_aead_ciphers_do_not_emit_legacy_warning(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            error, factory = get_cipher('chacha20-ietf-poly1305:test-key')
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(factory)
+        self.assertEqual(caught, [])
 
 
 class AdminAuthenticationTests(unittest.IsolatedAsyncioTestCase):

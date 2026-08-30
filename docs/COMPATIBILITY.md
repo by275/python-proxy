@@ -50,6 +50,9 @@ This document defines the Phase 0 baseline for the modernization work. It is not
 - Verify Shadowsocks plugin handshakes and framing separately from the protocol refactor.
 - Propose legacy cipher deprecations only after a separate security review.
 
+The current cipher recommendation, warning behavior, deprecation gates, and
+rollback procedure are documented in [`SECURITY_POLICY.md`](SECURITY_POLICY.md).
+
 ## Baseline Verification Commands
 
 These commands are intended to be reproducible Phase 0 checks:

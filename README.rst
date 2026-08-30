@@ -386,6 +386,9 @@ URI Syntax
 
   - RC4, RC4-MD5, Blowfish-CFB, CAST5-CFB, and DES-CFB are retained for wire compatibility only. Selecting one emits a warning; new deployments should prefer an AEAD cipher such as chacha20-ietf-poly1305 or aes-256-gcm.
 
+  - See ``docs/SECURITY_POLICY.md`` for the current legacy-cipher policy and the
+    criteria required before any future deprecation or removal.
+
   - AEAD ciphers use additional payload after each packet. The underlying protocol is different. Specifications: AEAD_.
 
   - Some pure python ciphers (aes-256-cfb1-py) is quite slow, and is not recommended to use without PyPy speedup. Try install pycryptodome_ and use C version cipher instead.
