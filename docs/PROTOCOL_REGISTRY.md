@@ -42,3 +42,8 @@ proto.register_protocol("adapter", Adapter, metadata)
 
 The metadata is descriptive. It does not install dependencies, alter URI parsing, or
 make an optional backend available by itself.
+
+The lifecycle and dependency contract for optional transports is documented in
+[`OPTIONAL_ADAPTERS.md`](OPTIONAL_ADAPTERS.md). The CLI supported-protocol line is
+derived from this registry's non-modifier metadata entries, so help output and
+capability metadata stay aligned when a registered protocol is added.

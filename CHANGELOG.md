@@ -18,6 +18,15 @@ and protocol wire formats compatible for Python 3.12+ Git installations.
   output is unchanged unless an application configures the new logger.
 - Preserved the existing optional dependency boundaries for H2, H3, QUIC,
   SSH, accelerated ciphers, and daemon mode.
+- Added a documented lifecycle contract and capability metadata for optional
+  adapters, plus dependency-range synchronization checks.
+- Removed optional adapter imports from the server facade dependency cycle while
+  retaining the historical server aliases.
+- Added lifecycle-aware Client/Server examples and documented the independent
+  relationship between structured logging and legacy verbose output.
+- Generated the CLI supported-protocol list from registry metadata and aligned
+  Git installation, optional extras, Python requirements, and container usage
+  documentation.
 
 ### Verification
 

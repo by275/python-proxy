@@ -7,6 +7,27 @@ python-proxy
    :target: https://www.python.org/
 HTTP/HTTP2/HTTP3/Socks4/Socks5/Shadowsocks/SSH/Redirect/Pf/QUIC/CFP TCP/UDP asynchronous tunnel proxy implemented in Python3 asyncio.
 
+Requirements
+------------
+
+- Python 3.12 or newer.
+- A Git checkout; this project is intended for private Git installation and is
+  not published to PyPI.
+
+Install the current checkout directly from Git:
+
+.. code:: rst
+
+  $ python3 -m pip install "git+https://github.com/by275/python-proxy.git"
+
+The optional extras are ``accelerated`` (PyCryptodome and uvloop), ``h2``
+(HTTP/2), ``sshtunnel`` (SSH), ``quic`` (QUIC/HTTP/3), and ``daemon``
+(daemon mode). They can be combined when needed, for example:
+
+.. code:: rst
+
+  $ python3 -m pip install "pproxy[h2,sshtunnel,quic] @ git+https://github.com/by275/python-proxy.git"
+
 QuickStart
 ----------
 
@@ -48,15 +69,9 @@ Apply CLI proxy: (MacOS, Linux)
 Run With Docker
 ---------------
 
-`pproxy` Docker container has both python3 (with Cryptodome for performance optimizations) and `pypy` versions available.
+The published image is available from GHCR:
 
-Python3:
-
-``docker run -it -p 8080:8080 mosajjal/pproxy:latest -l http://:8080 -vv``
-
-Pypy3:
-
-``docker run -it -p 8080:8080 mosajjal/pproxy:latest-pypy -l http://:8080 -vv``
+``docker run -it -p 8080:8080 ghcr.io/by275/pproxy:latest -l http://:8080 -vv``
 
 Features
 --------
@@ -136,6 +151,13 @@ Protocols
 | AUTO DETECT       | ✔          |            | ✔          |            | a+b+c+d://   |
 +-------------------+------------+------------+------------+------------+--------------+
 
+The canonical registry schemes are ``direct``, ``http``, ``httponly``,
+``httpadmin``, ``ssh``, ``socks4``, ``socks5`` (and the ``socks`` alias),
+``ss``, ``ssr``, ``redir``, ``pf``, ``tunnel``, ``echo``, ``ws``, ``cfp``,
+``trojan``, ``h2``, ``h3``, and ``quic``. ``ssl``, ``secure``, ``insecure``,
+and ``in`` are transport modifiers. H2, H3, QUIC, and SSH require their
+corresponding optional extra.
+
 Scheduling Algorithms
 ---------------------
 
@@ -200,7 +222,7 @@ Usage
                 [--sys] [--reuse] [--daemon] [--test TEST] [--version]
 
   Proxy server that can tunnel among remote servers by regex rules. Supported
-  protocols include http,socks4,socks5,shadowsocks,shadowsocksr,redirect,pf,tunnel,ws,cfp
+  protocols: direct,http,httponly,httpadmin,ssh,socks5,socks4,socks,ss,ssr,redir,pf,tunnel,echo,ws,cfp,trojan,h2,h3,quic
 
   options:
     -h, --help        show this help message and exit
@@ -223,7 +245,12 @@ Usage
     --test TEST       test this url for all remote proxies and exit
     --version         show program's version number and exit
 
-  Online help: <https://github.com/qwj/python-proxy>
+  Online help: <https://github.com/by275/python-proxy>
+
+The protocol line is generated from the runtime registry, so optional schemes
+remain visible in help even when their dependency is not installed. The command
+still fails with the existing missing-library message if such a scheme is used
+without its extra.
 
 URI Syntax
 ----------
@@ -405,11 +432,12 @@ Client API
     import asyncio, pproxy
 
     async def test_tcp(proxy_uri):
-        conn = pproxy.Connection(proxy_uri)
-        reader, writer = await conn.tcp_connect('google.com', 80)
-        writer.write(b'GET / HTTP/1.1\r\n\r\n')
-        data = await reader.read(1024*16)
-        print(data.decode())
+        async with pproxy.Connection(proxy_uri) as conn:
+            reader, writer = await conn.tcp_connect('google.com', 80)
+            writer.write(b'GET / HTTP/1.1\r\nHost: google.com\r\n\r\n')
+            data = await reader.read(1024*16)
+            writer.close()
+            print(data.decode())
 
     asyncio.run(test_tcp('ss://aes-256-cfb:password@remote_host:remote_port'))
 
@@ -420,11 +448,11 @@ Client API
     import asyncio, pproxy
 
     async def test_udp(proxy_uri):
-        conn = pproxy.Connection(proxy_uri)
-        answer = asyncio.Future()
-        await conn.udp_sendto('8.8.8.8', 53, b'hello the world', answer.set_result)
-        await answer
-        print(answer.result())
+        async with pproxy.Connection(proxy_uri) as conn:
+            answer = asyncio.Future()
+            await conn.udp_sendto('8.8.8.8', 53, b'hello the world', answer.set_result)
+            await answer
+            print(answer.result())
 
     asyncio.run(test_udp('ss://chacha20:password@remote_host:remote_port'))
 
@@ -438,22 +466,47 @@ Server API
     import asyncio
     import pproxy
 
-    server = pproxy.Server('ss://0.0.0.0:1234')
-    remote = pproxy.Connection('ss://1.2.3.4:5678')
-    args = dict( rserver = [remote],
-                 verbose = print )
+    async def serve():
+        option = pproxy.Server('ss://127.0.0.1:1234')
+        remote = pproxy.Connection('ss://1.2.3.4:5678')
+        listener = await option.start_server({
+            'rserver': [remote],
+            'verbose': print,
+        })
+        try:
+            await asyncio.Event().wait()
+        finally:
+            listener.close()
+            await listener.wait_closed()
+            await option.aclose()
+            await remote.aclose()
 
-    loop = asyncio.get_event_loop()
-    handler = loop.run_until_complete(server.start_server(args))
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        print('exit!')
+    asyncio.run(serve())
 
-    handler.close()
-    loop.run_until_complete(handler.wait_closed())
-    loop.run_until_complete(loop.shutdown_asyncgens())
-    loop.close()
+  The listener returned by ``start_server()`` and the proxy option are separate
+  owners. ``close()`` remains available for synchronous callers; use
+  ``wait_closed()`` after it when shutdown must be observed, or use ``aclose()``
+  and the async context manager for application-owned proxy objects. See
+  ``docs/RUNTIME_API.md`` for the complete lifecycle and logging examples.
+
+Observability
+-------------
+
+The existing ``-v`` option and ``verbose`` callback retain their console format
+and statistics behavior. Applications may opt into JSON records for their own
+logging events:
+
+.. code:: rst
+
+  import logging
+  from pproxy.observability import configure_logging
+
+  logger = configure_logging(logging.INFO, structured=True)
+  logger.info('application event')
+
+``configure_logging()`` does not convert or redirect the legacy verbose
+callback automatically; applications which need proxy events in structured
+logs should connect their own logging or callback integration.
 
 
 Examples
