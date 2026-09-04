@@ -6,6 +6,10 @@ on:
       - master
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 env:
   IMAGE_NAME: ghcr.io/by275/pproxy
 
@@ -18,7 +22,7 @@ jobs:
       packages: write
 
     steps:
-      - name: Check out source
+      - name: Checkout
         uses: actions/checkout@v7
 
       - name: Set up Python
@@ -28,7 +32,6 @@ jobs:
 
       - name: Read package version
         id: package
-        shell: bash
         run: |
           version="$(python -c 'from pproxy.__doc__ import __version__; print(__version__)')"
           if [[ "$version" == "unknown" || "$version" =~ ^[0-9a-f]{7,40}$ ]]; then
@@ -63,7 +66,7 @@ jobs:
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ steps.package.outputs.short_sha }}
 
-      - name: Notify Discord on failure
+      - name: Notification
         if: always()
         uses: sarisia/actions-status-discord@v1
         with:
