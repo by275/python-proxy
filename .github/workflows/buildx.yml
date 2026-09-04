@@ -17,6 +17,9 @@ jobs:
   buildx:
     name: Build and publish Docker image
     runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -62,6 +65,8 @@ jobs:
             PPROXY_VERSION=${{ steps.package.outputs.version }}
           platforms: linux/amd64,linux/arm64
           push: true
+          cache-from: type=gha,scope=pproxy
+          cache-to: type=gha,mode=max,scope=pproxy
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ steps.package.outputs.short_sha }}
